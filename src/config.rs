@@ -80,5 +80,5 @@ impl Config {
 }
 
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|base| base.join("unibar").join("config.toml"))
+    dirs::config_dir().map(|base| base.join("rubar").join("config.toml"))
 }

@@ -512,6 +512,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "rubar"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cosmic-text",
+ "dirs",
+ "memmap2",
+ "serde",
+ "tempfile",
+ "tiny-skia",
+ "toml",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -812,23 +829,6 @@ name = "ttf-parser"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c591d83f69777866b9126b24c6dd9a18351f177e49d625920d19f989fd31cf8"
-
-[[package]]
-name = "unibar"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "cosmic-text",
- "dirs",
- "memmap2",
- "serde",
- "tempfile",
- "tiny-skia",
- "toml",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
-]
 
 [[package]]
 name = "unicode-bidi"

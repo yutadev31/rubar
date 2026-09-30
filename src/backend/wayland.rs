@@ -40,7 +40,7 @@ impl Backend for WaylandBackend {
             &surface,
             None::<&wl_output::WlOutput>,
             zwlr_layer_shell_v1::Layer::Top,
-            "unibar".to_string(),
+            "rubar".to_string(),
             &qh,
             (),
         );
