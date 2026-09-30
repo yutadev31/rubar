@@ -1,6 +1,7 @@
 mod app;
 mod backend;
 mod render;
+mod widget;
 
 use std::error::Error;
 

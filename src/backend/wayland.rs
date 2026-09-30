@@ -5,12 +5,16 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop,
     globals::GlobalListContents,
     globals::registry_queue_init,
-    protocol::{wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface},
+    protocol::{
+        wl_buffer, wl_callback, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool,
+        wl_surface,
+    },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::Backend;
 use crate::render::{BAR_HEIGHT, BarRenderer};
+use crate::widget::Widget;
 
 const WIDTH_FALLBACK: u32 = 1280;
 
@@ -18,7 +22,11 @@ const WIDTH_FALLBACK: u32 = 1280;
 pub struct WaylandBackend;
 
 impl Backend for WaylandBackend {
-    fn run(&mut self, renderer: &mut BarRenderer) -> Result<(), Box<dyn Error>> {
+    fn run(
+        &mut self,
+        renderer: &mut BarRenderer,
+        widgets: &mut [Box<dyn Widget>],
+    ) -> Result<(), Box<dyn Error>> {
         let connection = Connection::connect_to_env()?;
         let (globals, mut event_queue) = registry_queue_init::<State>(&connection)?;
         let qh = event_queue.handle();
@@ -51,13 +59,13 @@ impl Backend for WaylandBackend {
         let mut state = State::new(shm, surface, layer_surface);
         event_queue.roundtrip(&mut state)?;
         if state.needs_redraw {
-            state.draw(&qh, renderer)?;
+            state.draw(&qh, renderer, widgets)?;
         }
 
         while !state.closed {
             event_queue.blocking_dispatch(&mut state)?;
             if state.needs_redraw {
-                state.draw(&qh, renderer)?;
+                state.draw(&qh, renderer, widgets)?;
             }
         }
         Ok(())
@@ -69,6 +77,7 @@ struct State {
     surface: wl_surface::WlSurface,
     layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     buffer: Option<ShmBuffer>,
+    frame_callback: Option<wl_callback::WlCallback>,
     width: u32,
     needs_redraw: bool,
     closed: bool,
@@ -85,6 +94,7 @@ impl State {
             surface,
             layer_surface,
             buffer: None,
+            frame_callback: None,
             width: WIDTH_FALLBACK,
             needs_redraw: false,
             closed: false,
@@ -95,6 +105,7 @@ impl State {
         &mut self,
         qh: &QueueHandle<Self>,
         renderer: &mut BarRenderer,
+        widgets: &mut [Box<dyn Widget>],
     ) -> Result<(), Box<dyn Error>> {
         let width = self.width.max(1);
         let stride = width * 4;
@@ -102,7 +113,7 @@ impl State {
         let file = tempfile::tempfile()?;
         file.set_len(size as u64)?;
         let mut mapping = unsafe { MmapMut::map_mut(&file)? };
-        let pixels = renderer.render(width, BAR_HEIGHT);
+        let pixels = renderer.render(width, BAR_HEIGHT, widgets);
         mapping.copy_from_slice(&pixels);
 
         let pool = self.shm.create_pool(file.as_fd(), size as i32, qh, ());
@@ -119,6 +130,7 @@ impl State {
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface
             .damage_buffer(0, 0, width as i32, BAR_HEIGHT as i32);
+        self.frame_callback = Some(self.surface.frame(qh, ()));
         self.surface.commit();
         self.buffer = Some(ShmBuffer {
             _buffer: buffer,
@@ -166,6 +178,22 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for State {
         _conn: &wayland_client::Connection,
         _qh: &QueueHandle<Self>,
     ) {
+    }
+}
+
+impl Dispatch<wl_callback::WlCallback, ()> for State {
+    fn event(
+        state: &mut Self,
+        _proxy: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if matches!(event, wl_callback::Event::Done { .. }) {
+            state.frame_callback = None;
+            state.needs_redraw = true;
+        }
     }
 }
 
