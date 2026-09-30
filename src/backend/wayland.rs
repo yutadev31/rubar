@@ -13,7 +13,7 @@ use wayland_client::{
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::Backend;
-use crate::render::{BAR_HEIGHT, BarRenderer};
+use crate::render::BarRenderer;
 use crate::widget::Widget;
 
 const WIDTH_FALLBACK: u32 = 1280;
@@ -49,8 +49,8 @@ impl Backend for WaylandBackend {
                 | zwlr_layer_surface_v1::Anchor::Left
                 | zwlr_layer_surface_v1::Anchor::Right,
         );
-        layer_surface.set_size(0, BAR_HEIGHT);
-        layer_surface.set_exclusive_zone(BAR_HEIGHT as i32);
+        layer_surface.set_size(0, renderer.height());
+        layer_surface.set_exclusive_zone(renderer.height() as i32);
         layer_surface
             .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
 
@@ -108,19 +108,20 @@ impl State {
         widgets: &mut [Box<dyn Widget>],
     ) -> Result<(), Box<dyn Error>> {
         let width = self.width.max(1);
+        let height = renderer.height();
         let stride = width * 4;
-        let size = stride * BAR_HEIGHT;
+        let size = stride * height;
         let file = tempfile::tempfile()?;
         file.set_len(size as u64)?;
         let mut mapping = unsafe { MmapMut::map_mut(&file)? };
-        let pixels = renderer.render(width, BAR_HEIGHT, widgets);
+        let pixels = renderer.render(width, height, widgets);
         mapping.copy_from_slice(&pixels);
 
         let pool = self.shm.create_pool(file.as_fd(), size as i32, qh, ());
         let buffer = pool.create_buffer(
             0,
             width as i32,
-            BAR_HEIGHT as i32,
+            height as i32,
             stride as i32,
             wl_shm::Format::Argb8888,
             qh,
@@ -129,7 +130,7 @@ impl State {
         pool.destroy();
         self.surface.attach(Some(&buffer), 0, 0);
         self.surface
-            .damage_buffer(0, 0, width as i32, BAR_HEIGHT as i32);
+            .damage_buffer(0, 0, width as i32, height as i32);
         self.frame_callback = Some(self.surface.frame(qh, ()));
         self.surface.commit();
         self.buffer = Some(ShmBuffer {

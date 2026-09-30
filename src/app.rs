@@ -7,18 +7,18 @@ use crate::{
     widget::{Widget, clock::Clock},
 };
 
-pub struct App {
+pub struct App<'a> {
     backend: Box<dyn Backend>,
-    renderer: BarRenderer,
+    renderer: BarRenderer<'a>,
     widgets: Vec<Box<dyn Widget>>,
 }
 
-impl App {
-    pub fn new(config: Config) -> Self {
+impl<'a> App<'a> {
+    pub fn new(config: &'a Config) -> Self {
         Self {
             backend: Box::new(backend::wayland::WaylandBackend::default()),
-            renderer: BarRenderer::new(),
-            widgets: vec![Box::new(Clock::new(config.clock))],
+            renderer: BarRenderer::new(&config.style),
+            widgets: vec![Box::new(Clock::new(&config.clock))],
         }
     }
 

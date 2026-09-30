@@ -6,6 +6,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
+    pub style: StyleConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -13,10 +14,47 @@ pub struct ClockConfig {
     pub show_seconds: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct StyleConfig {
+    pub colors: ColorsConfig,
+    pub height: u32,
+    pub font_size: f32,
+    pub padding: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ColorsConfig {
+    pub bg: String,
+    pub text: String,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             clock: ClockConfig::default(),
+            style: StyleConfig::default(),
+        }
+    }
+}
+
+impl Default for StyleConfig {
+    fn default() -> Self {
+        Self {
+            colors: ColorsConfig::default(),
+            height: 28,
+            font_size: 14.0,
+            padding: 8,
+        }
+    }
+}
+
+impl Default for ColorsConfig {
+    fn default() -> Self {
+        Self {
+            bg: "#1f232b".to_string(),
+            text: "#ffffff".to_string(),
         }
     }
 }

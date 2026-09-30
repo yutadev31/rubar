@@ -7,6 +7,7 @@ mod widget;
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    app::App::new(config::Config::load()?).run()?;
+    let config = config::Config::load()?;
+    app::App::new(&config).run()?;
     Ok(())
 }

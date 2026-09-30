@@ -9,7 +9,7 @@ pub struct Clock {
 }
 
 impl Clock {
-    pub fn new(config: ClockConfig) -> Self {
+    pub fn new(config: &ClockConfig) -> Self {
         Self {
             show_seconds: config.show_seconds,
         }
