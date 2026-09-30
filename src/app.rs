@@ -2,6 +2,7 @@ use std::error::Error;
 
 use crate::{
     backend::{self, Backend},
+    config::Config,
     render::BarRenderer,
     widget::{Widget, clock::Clock},
 };
@@ -13,11 +14,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
             backend: Box::new(backend::wayland::WaylandBackend::default()),
             renderer: BarRenderer::new(),
-            widgets: vec![Box::new(Clock::default())],
+            widgets: vec![Box::new(Clock::new(config.clock))],
         }
     }
 

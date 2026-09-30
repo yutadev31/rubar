@@ -6,6 +6,9 @@ edition = "2024"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cosmic-text = "0.14"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 memmap2 = "0.9"
 tempfile = "3"
 tiny-skia = "0.11"
