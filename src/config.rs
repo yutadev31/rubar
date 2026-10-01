@@ -6,6 +6,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
+    pub modules: ModulesConfig,
     pub volume: VolumeConfig,
     pub style: StyleConfig,
 }
@@ -14,6 +15,14 @@ pub struct Config {
 #[serde(default)]
 pub struct ClockConfig {
     pub show_seconds: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ModulesConfig {
+    pub left: Vec<String>,
+    pub center: Vec<String>,
+    pub right: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +56,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             clock: ClockConfig::default(),
+            modules: ModulesConfig::default(),
             volume: VolumeConfig::default(),
             style: StyleConfig::default(),
         }
@@ -80,6 +90,16 @@ impl Default for ClockConfig {
     fn default() -> Self {
         Self {
             show_seconds: false,
+        }
+    }
+}
+
+impl Default for ModulesConfig {
+    fn default() -> Self {
+        Self {
+            left: Vec::new(),
+            center: Vec::new(),
+            right: Vec::new(),
         }
     }
 }

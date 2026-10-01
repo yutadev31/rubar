@@ -14,7 +14,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 
 use super::Backend;
 use crate::render::BarRenderer;
-use crate::widget::Widget;
+use crate::widget::WidgetGroups;
 
 const WIDTH_FALLBACK: u32 = 1280;
 
@@ -25,7 +25,7 @@ impl Backend for WaylandBackend {
     fn run(
         &mut self,
         renderer: &mut BarRenderer,
-        widgets: &mut [Box<dyn Widget>],
+        widgets: &mut WidgetGroups,
     ) -> Result<(), Box<dyn Error>> {
         let connection = Connection::connect_to_env()?;
         let (globals, mut event_queue) = registry_queue_init::<State>(&connection)?;
@@ -105,7 +105,7 @@ impl State {
         &mut self,
         qh: &QueueHandle<Self>,
         renderer: &mut BarRenderer,
-        widgets: &mut [Box<dyn Widget>],
+        widgets: &mut WidgetGroups,
     ) -> Result<(), Box<dyn Error>> {
         let width = self.width.max(1);
         let height = renderer.height();

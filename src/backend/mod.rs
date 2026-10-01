@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::render::BarRenderer;
-use crate::widget::Widget;
+use crate::widget::WidgetGroups;
 
 pub mod wayland;
 
@@ -11,6 +11,6 @@ pub trait Backend {
     fn run(
         &mut self,
         renderer: &mut BarRenderer,
-        widgets: &mut [Box<dyn Widget>],
+        widgets: &mut WidgetGroups,
     ) -> Result<(), Box<dyn Error>>;
 }

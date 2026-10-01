@@ -7,7 +7,7 @@ use cosmic_text::{
 use tiny_skia::{Color, Pixmap};
 
 use crate::config::StyleConfig;
-use crate::widget::Widget;
+use crate::widget::{Widget, WidgetGroups};
 
 /// Renderer shared by window-system backends.
 ///
@@ -33,7 +33,7 @@ impl<'a> BarRenderer<'a> {
         self.config.height.max(1)
     }
 
-    pub fn render(&mut self, width: u32, height: u32, widgets: &mut [Box<dyn Widget>]) -> Vec<u8> {
+    pub fn render(&mut self, width: u32, height: u32, widgets: &mut WidgetGroups) -> Vec<u8> {
         let mut pixmap = Pixmap::new(width, height).expect("valid bar dimensions");
         let background = parse_color(&self.config.colors.bg).expect("validated background color");
         let text = parse_rgba(&self.config.colors.text).expect("validated text color");
@@ -41,18 +41,33 @@ impl<'a> BarRenderer<'a> {
         let font_size = self.config.font_size.max(1.0);
         pixmap.fill(background);
 
-        let mut right = width.saturating_sub(self.config.padding) as i32;
-        for widget in widgets.iter_mut() {
-            let widget_width = self.draw_text(
-                &mut pixmap,
-                &widget.text(),
-                right,
-                height,
-                font_size,
-                text_color,
-            );
-            right -= widget_width + self.config.spacing as i32;
-        }
+        self.draw_group(
+            &mut pixmap,
+            &mut widgets.left,
+            width,
+            height,
+            font_size,
+            text_color,
+            Alignment::Left,
+        );
+        self.draw_group(
+            &mut pixmap,
+            &mut widgets.center,
+            width,
+            height,
+            font_size,
+            text_color,
+            Alignment::Center,
+        );
+        self.draw_group(
+            &mut pixmap,
+            &mut widgets.right,
+            width,
+            height,
+            font_size,
+            text_color,
+            Alignment::Right,
+        );
 
         // tiny-skia stores RGBA pixels. On little-endian machines Wayland's
         // ARGB8888 shm format is laid out as B,G,R,A, so convert explicitly.
@@ -61,6 +76,90 @@ impl<'a> BarRenderer<'a> {
             .chunks_exact(4)
             .flat_map(|rgba| [rgba[2], rgba[1], rgba[0], rgba[3]])
             .collect()
+    }
+
+    fn draw_group(
+        &mut self,
+        pixmap: &mut Pixmap,
+        widgets: &mut [Box<dyn Widget>],
+        width: u32,
+        height: u32,
+        font_size: f32,
+        text_color: TextColor,
+        alignment: Alignment,
+    ) {
+        let mut items = Vec::with_capacity(widgets.len());
+        for widget in widgets.iter_mut() {
+            let text = widget.text();
+            let text_width = self.measure_text(&text, width, height, font_size, text_color);
+            items.push((text, text_width));
+        }
+
+        let spacing = self.config.spacing as i32;
+        let total_width = items.iter().map(|(_, width)| *width).sum::<i32>()
+            + spacing * items.len().saturating_sub(1) as i32;
+        let mut cursor = match alignment {
+            Alignment::Left => self.config.padding as i32,
+            Alignment::Center => (width as i32 - total_width) / 2,
+            Alignment::Right => width.saturating_sub(self.config.padding) as i32,
+        };
+
+        let items = if matches!(alignment, Alignment::Right) {
+            items.into_iter().rev().collect::<Vec<_>>()
+        } else {
+            items
+        };
+        for (text, text_width) in items {
+            match alignment {
+                Alignment::Right => {
+                    self.draw_text(pixmap, &text, cursor, height, font_size, text_color);
+                    cursor -= text_width + spacing;
+                }
+                Alignment::Left | Alignment::Center => {
+                    self.draw_text(
+                        pixmap,
+                        &text,
+                        cursor + text_width,
+                        height,
+                        font_size,
+                        text_color,
+                    );
+                    cursor += text_width + spacing;
+                }
+            }
+        }
+    }
+
+    fn measure_text(
+        &mut self,
+        text: &str,
+        width: u32,
+        height: u32,
+        font_size: f32,
+        text_color: TextColor,
+    ) -> i32 {
+        let line_height = font_size * 1.2857;
+        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
+        buffer.set_size(
+            &mut self.font_system,
+            Some(width as f32),
+            Some(height as f32),
+        );
+        buffer.set_wrap(&mut self.font_system, Wrap::None);
+        let mut attrs = Attrs::new().color(text_color);
+        if !self.config.font_family.is_empty() {
+            attrs = attrs.family(Family::Name(&self.config.font_family));
+        }
+        if self.config.bold {
+            attrs = attrs.weight(Weight::BOLD);
+        }
+        buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+        buffer
+            .layout_runs()
+            .map(|run| run.line_w)
+            .fold(0.0_f32, f32::max)
+            .ceil() as i32
     }
 
     fn draw_text(
@@ -125,6 +224,13 @@ impl<'a> BarRenderer<'a> {
         );
         text_width
     }
+}
+
+#[derive(Clone, Copy)]
+enum Alignment {
+    Left,
+    Center,
+    Right,
 }
 
 fn parse_color(value: &str) -> Result<Color, Box<dyn Error>> {

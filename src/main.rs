@@ -8,6 +8,6 @@ use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = config::Config::load()?;
-    app::App::new(&config).run()?;
+    app::App::new(&config)?.run()?;
     Ok(())
 }
