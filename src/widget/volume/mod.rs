@@ -48,7 +48,13 @@ impl Widget for Volume {
             return WidgetContent::Text("VOL --".to_string());
         };
         let mut buttons = vec![WidgetButton {
-            text: format_volume(&self.format, &self.muted_format, state.percent, state.muted),
+            text: Some(format_volume(
+                &self.format,
+                &self.muted_format,
+                state.percent,
+                state.muted,
+            )),
+            icon: None,
             padding: None,
             bold: None,
             color: None,
@@ -56,12 +62,13 @@ impl Widget for Volume {
         }];
         if let Some(microphone) = state.microphone {
             buttons.push(WidgetButton {
-                text: format_volume(
+                text: Some(format_volume(
                     &self.microphone_format,
                     &self.microphone_muted_format,
                     microphone.percent,
                     microphone.muted,
-                ),
+                )),
+                icon: None,
                 padding: None,
                 bold: None,
                 color: None,

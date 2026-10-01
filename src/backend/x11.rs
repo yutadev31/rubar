@@ -3,8 +3,8 @@ use std::{error::Error, thread, time::Duration};
 use x11rb::{
     connection::Connection,
     protocol::xproto::{
-        AtomEnum, ClientMessageEvent, ConnectionExt, CreateGCAux, CreateWindowAux, EventMask,
-        ImageFormat, PropMode, WindowClass,
+        AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt, CreateGCAux,
+        CreateWindowAux, EventMask, ImageFormat, PropMode, WindowClass,
     },
     rust_connection::RustConnection,
     wrapper::ConnectionExt as WrapperConnectionExt,
@@ -12,9 +12,12 @@ use x11rb::{
 
 use super::Backend;
 use crate::{
+    config::TrayConfig,
     render::BarRenderer,
     widget::{MouseButton, ScrollDirection, WidgetGroups},
 };
+
+use super::x11_tray::Tray;
 
 /// X11 dock window for traditional WMs such as i3.
 #[derive(Default)]
@@ -25,12 +28,17 @@ impl Backend for X11Backend {
         &mut self,
         renderer: &mut BarRenderer,
         widgets: &mut WidgetGroups,
+        tray_config: &TrayConfig,
     ) -> Result<(), Box<dyn Error>> {
         let (connection, screen_number) = RustConnection::connect(None)?;
         let screen = &connection.setup().roots[screen_number];
         let root = screen.root;
         let width = u32::from(screen.width_in_pixels).max(1);
         let height = renderer.height();
+        let mut tray = Tray::new(&connection, screen, tray_config)?;
+        let bar_width = width
+            .saturating_sub(tray.as_ref().map_or(0, Tray::width))
+            .max(1);
         let window = connection.generate_id()?;
         let event_mask = EventMask::EXPOSURE
             | EventMask::STRUCTURE_NOTIFY
@@ -43,7 +51,7 @@ impl Backend for X11Backend {
             root,
             0,
             0,
-            width as u16,
+            bar_width as u16,
             height as u16,
             0,
             WindowClass::INPUT_OUTPUT,
@@ -75,7 +83,20 @@ impl Backend for X11Backend {
             window,
             atoms.net_wm_strut_partial,
             AtomEnum::CARDINAL,
-            &[0, 0, height, 0, 0, 0, 0, 0, 0, width - 1, 0, 0],
+            &[
+                0,
+                0,
+                height,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                width.saturating_sub(1),
+                0,
+                0,
+            ],
         )?;
         connection.change_property32(
             PropMode::REPLACE,
@@ -100,11 +121,14 @@ impl Backend for X11Backend {
             connection,
             window,
             gc,
-            width,
+            width: bar_width,
+            screen_width: width,
             height,
             renderer,
             widgets,
+            tray: tray.take(),
         };
+        state.sync_layout()?;
         state.redraw()?;
 
         loop {
@@ -125,9 +149,11 @@ struct State<'a, 'config> {
     window: u32,
     gc: u32,
     width: u32,
+    screen_width: u32,
     height: u32,
     renderer: &'a mut BarRenderer<'config>,
     widgets: &'a mut WidgetGroups,
+    tray: Option<Tray>,
 }
 
 impl State<'_, '_> {
@@ -149,7 +175,34 @@ impl State<'_, '_> {
         Ok(())
     }
 
+    fn sync_layout(&mut self) -> Result<(), Box<dyn Error>> {
+        let tray_width = self.tray.as_ref().map_or(0, Tray::width);
+        self.width = self.screen_width.saturating_sub(tray_width).max(1);
+        self.connection.configure_window(
+            self.window,
+            &ConfigureWindowAux::new().x(0).y(0).width(self.width),
+        )?;
+        if let Some(tray) = self.tray.as_ref() {
+            tray.place(&self.connection, self.width, 0)?;
+        }
+        self.connection.flush()?;
+        Ok(())
+    }
+
     fn handle_event(&mut self, event: x11rb::protocol::Event) -> Result<bool, Box<dyn Error>> {
+        let tray_changed = if let Some(tray) = self.tray.as_mut() {
+            let old_width = tray.width();
+            if !tray.handle_event(&self.connection, &event)? {
+                return Ok(false);
+            }
+            tray.width() != old_width
+        } else {
+            false
+        };
+        if tray_changed {
+            self.sync_layout()?;
+            self.redraw()?;
+        }
         use x11rb::protocol::Event;
         match event {
             Event::Expose(_) => self.redraw()?,

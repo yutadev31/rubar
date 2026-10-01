@@ -1,5 +1,6 @@
 pub mod battery;
 pub mod clock;
+pub mod tray;
 pub mod volume;
 pub mod workspace;
 
@@ -25,15 +26,28 @@ pub enum WidgetContent {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct WidgetButton {
-    pub text: String,
+    pub text: Option<String>,
+    pub icon: Option<WidgetIcon>,
     pub padding: Option<u32>,
     pub bold: Option<bool>,
     pub color: Option<[u8; 4]>,
     pub background: Option<[u8; 4]>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetIcon {
+    pub width: u32,
+    pub height: u32,
+    /// Premultiplied-independent ARGB bytes, four bytes per pixel.
+    pub pixels: Vec<u8>,
+}
+
 pub trait Widget {
     fn content(&mut self) -> WidgetContent;
+
+    fn take_redraw_request(&self) -> bool {
+        false
+    }
 
     fn set_monitor_name(&mut self, _monitor_name: Option<&str>) {}
 
@@ -49,6 +63,16 @@ pub struct WidgetGroups {
 }
 
 impl WidgetGroups {
+    pub fn take_redraw_request(&self) -> bool {
+        self.left
+            .iter()
+            .chain(self.center.iter())
+            .chain(self.right.iter())
+            .fold(false, |requested, widget| {
+                widget.take_redraw_request() || requested
+            })
+    }
+
     pub fn set_monitor_name(&mut self, monitor_name: Option<&str>) {
         for widget in self
             .left

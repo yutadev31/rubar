@@ -12,14 +12,22 @@ pub struct App<'a> {
     backend: Box<dyn Backend>,
     renderer: BarRenderer<'a>,
     widgets: WidgetGroups,
+    config: &'a Config,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: &'a Config) -> Result<Self, Box<dyn Error>> {
+        let wayland = env::var_os("WAYLAND_DISPLAY").is_some();
+        let mut right = config.modules.right.clone();
+        // Wayland has no XEmbed equivalent.  The standard solution is a
+        // StatusNotifierItem host, exposed as the built-in tray widget.
+        if wayland && config.tray.enabled && !right.iter().any(|name| name == "tray") {
+            right.push("tray".to_string());
+        }
         let widgets = WidgetGroups {
             left: create_widgets(&config.modules.left, config)?,
             center: create_widgets(&config.modules.center, config)?,
-            right: create_widgets(&config.modules.right, config)?,
+            right: create_widgets(&right, config)?,
         };
         let backend: Box<dyn Backend> = if env::var_os("WAYLAND_DISPLAY").is_some() {
             Box::new(backend::wayland::WaylandBackend::default())
@@ -30,11 +38,13 @@ impl<'a> App<'a> {
             backend,
             renderer: BarRenderer::new(&config.style),
             widgets,
+            config,
         })
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        self.backend.run(&mut self.renderer, &mut self.widgets)
+        self.backend
+            .run(&mut self.renderer, &mut self.widgets, &self.config.tray)
     }
 }
 
@@ -52,6 +62,9 @@ fn create_widgets(
             "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
             "workspace" => {
                 Ok(Box::new(Workspace::new(&config.workspace)) as Box<dyn crate::widget::Widget>)
+            }
+            "tray" => {
+                Ok(Box::new(crate::widget::tray::Tray::new()) as Box<dyn crate::widget::Widget>)
             }
             _ => Err(format!("unknown module `{name}`").into()),
         })

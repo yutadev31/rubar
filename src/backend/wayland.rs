@@ -18,8 +18,8 @@ use wayland_client::{
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::Backend;
-use crate::render::BarRenderer;
 use crate::widget::{MouseButton, ScrollDirection, WidgetGroups};
+use crate::{config::TrayConfig, render::BarRenderer};
 
 const WIDTH_FALLBACK: u32 = 1280;
 const REDRAW_INTERVAL: Duration = Duration::from_millis(16);
@@ -32,6 +32,7 @@ impl Backend for WaylandBackend {
         &mut self,
         renderer: &mut BarRenderer,
         widgets: &mut WidgetGroups,
+        _tray: &TrayConfig,
     ) -> Result<(), Box<dyn Error>> {
         let connection = Connection::connect_to_env()?;
         let (globals, mut event_queue) = registry_queue_init::<State>(&connection)?;
@@ -98,6 +99,12 @@ impl Backend for WaylandBackend {
 
         while !state.closed {
             event_queue.blocking_dispatch(&mut state)?;
+            if widgets.take_redraw_request() {
+                state.needs_redraw = true;
+                for bar in &mut state.bars {
+                    bar.needs_redraw = true;
+                }
+            }
             let pointer_events = std::mem::take(&mut state.pending_pointer_events);
             if !pointer_events.is_empty() {
                 state.needs_redraw = true;
