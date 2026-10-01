@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::VolumeConfig;
 
-use super::{MouseButton, ScrollDirection, Widget};
+use super::{MouseButton, ScrollDirection, Widget, WidgetContent};
 
 pub mod provider;
 
@@ -30,7 +30,7 @@ impl Volume {
 }
 
 impl Widget for Volume {
-    fn text(&mut self) -> String {
+    fn content(&mut self) -> WidgetContent {
         let should_refresh = self
             .last_refresh
             .is_none_or(|last| last.elapsed() >= self.refresh_interval);
@@ -39,14 +39,16 @@ impl Widget for Volume {
             self.last_refresh = Some(Instant::now());
         }
         let Some(state) = self.state else {
-            return "VOL --".to_string();
+            return WidgetContent::Text("VOL --".to_string());
         };
-        self.format
-            .replace("{volume}", &state.percent.to_string())
-            .replace("{muted}", if state.muted { "muted" } else { "unmuted" })
+        WidgetContent::Text(
+            self.format
+                .replace("{volume}", &state.percent.to_string())
+                .replace("{muted}", if state.muted { "muted" } else { "unmuted" }),
+        )
     }
 
-    fn on_click(&mut self, button: MouseButton) {
+    fn on_click(&mut self, button: MouseButton, _item: usize) {
         if button != MouseButton::Left {
             return;
         }

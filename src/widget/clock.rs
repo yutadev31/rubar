@@ -1,6 +1,6 @@
 use chrono::Local;
 
-use super::Widget;
+use super::{Widget, WidgetContent};
 use crate::config::ClockConfig;
 
 #[derive(Debug)]
@@ -17,12 +17,12 @@ impl Clock {
 }
 
 impl Widget for Clock {
-    fn text(&mut self) -> String {
+    fn content(&mut self) -> WidgetContent {
         let format = if self.show_seconds {
             "%H:%M:%S"
         } else {
             "%H:%M"
         };
-        Local::now().format(format).to_string()
+        WidgetContent::Text(Local::now().format(format).to_string())
     }
 }

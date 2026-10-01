@@ -4,10 +4,12 @@ use cosmic_text::{
     Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
     Wrap,
 };
-use tiny_skia::{Color, Pixmap};
+use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 
 use crate::config::StyleConfig;
-use crate::widget::{MouseButton, ScrollDirection, Widget, WidgetGroups};
+use crate::widget::{
+    MouseButton, ScrollDirection, Widget, WidgetButton, WidgetContent, WidgetGroups,
+};
 
 /// Renderer shared by window-system backends.
 ///
@@ -113,14 +115,47 @@ impl<'a> BarRenderer<'a> {
     ) {
         let mut items = Vec::with_capacity(widgets.len());
         for (index, widget) in widgets.iter_mut().enumerate() {
-            let text = widget.text();
-            let text_width = self.measure_text(&text, width, height, font_size, text_color);
-            items.push((index, text, text_width));
+            let content = widget.content();
+            let buttons = match content {
+                WidgetContent::Text(text) => vec![WidgetButton {
+                    text,
+                    bold: None,
+                    color: None,
+                    background: None,
+                }],
+                WidgetContent::Buttons(buttons) => buttons,
+            };
+            for (button_index, button) in buttons.into_iter().enumerate() {
+                let text_width = self.measure_text(
+                    &button.text,
+                    width,
+                    height,
+                    font_size,
+                    text_color,
+                    button.bold.unwrap_or(self.config.bold),
+                );
+                items.push((index, button_index, button, text_width));
+            }
         }
 
         let spacing = self.config.spacing as i32;
-        let total_width = items.iter().map(|(_, _, width)| *width).sum::<i32>()
-            + spacing * items.len().saturating_sub(1) as i32;
+        let button_padding = self.config.button_padding as i32;
+        let button_vertical_padding = self.config.button_vertical_padding;
+        let button_spacing = self.config.button_spacing as i32;
+        let total_width = items
+            .iter()
+            .map(|(_, _, _, width)| *width + button_padding * 2)
+            .sum::<i32>()
+            + items
+                .windows(2)
+                .map(|pair| {
+                    if pair[0].0 == pair[1].0 {
+                        button_spacing
+                    } else {
+                        spacing
+                    }
+                })
+                .sum::<i32>();
         let mut cursor = match alignment {
             Alignment::Left => self.config.padding as i32,
             Alignment::Center => (width as i32 - total_width) / 2,
@@ -132,29 +167,112 @@ impl<'a> BarRenderer<'a> {
         } else {
             items
         };
-        for (index, text, text_width) in items {
+        for (position, (index, button_index, button, text_width)) in items.iter().enumerate() {
+            let index = *index;
+            let button_index = *button_index;
+            let text_width = *text_width;
+            let button_width = text_width + button_padding * 2;
+            let bold = button.bold.unwrap_or(self.config.bold);
+            let button_color = button
+                .color
+                .map(|[r, g, b, a]| TextColor::rgba(r, g, b, a))
+                .unwrap_or(text_color);
             match alignment {
                 Alignment::Right => {
-                    self.hitboxes
-                        .push(Hitbox::new(cursor - text_width, cursor, alignment, index));
-                    self.draw_text(pixmap, &text, cursor, height, font_size, text_color);
-                    cursor -= text_width + spacing;
-                }
-                Alignment::Left | Alignment::Center => {
-                    self.hitboxes
-                        .push(Hitbox::new(cursor, cursor + text_width, alignment, index));
+                    self.draw_button_background(
+                        pixmap,
+                        cursor - button_width,
+                        cursor,
+                        height,
+                        button_vertical_padding,
+                        button.background,
+                    );
+                    self.hitboxes.push(Hitbox::new(
+                        cursor - button_width,
+                        cursor,
+                        alignment,
+                        index,
+                        button_index,
+                    ));
                     self.draw_text(
                         pixmap,
-                        &text,
-                        cursor + text_width,
+                        &button.text,
+                        cursor - button_padding,
                         height,
                         font_size,
-                        text_color,
+                        button_color,
+                        bold,
                     );
-                    cursor += text_width + spacing;
+                    cursor -=
+                        button_width + next_spacing(&items, position, spacing, button_spacing);
+                }
+                Alignment::Left | Alignment::Center => {
+                    self.draw_button_background(
+                        pixmap,
+                        cursor,
+                        cursor + button_width,
+                        height,
+                        button_vertical_padding,
+                        button.background,
+                    );
+                    self.hitboxes.push(Hitbox::new(
+                        cursor,
+                        cursor + button_width,
+                        alignment,
+                        index,
+                        button_index,
+                    ));
+                    self.draw_text(
+                        pixmap,
+                        &button.text,
+                        cursor + button_padding + text_width,
+                        height,
+                        font_size,
+                        button_color,
+                        bold,
+                    );
+                    cursor +=
+                        button_width + next_spacing(&items, position, spacing, button_spacing);
                 }
             }
         }
+    }
+
+    fn draw_button_background(
+        &self,
+        pixmap: &mut Pixmap,
+        left: i32,
+        right: i32,
+        height: u32,
+        vertical_padding: u32,
+        background: Option<[u8; 4]>,
+    ) {
+        let Some([r, g, b, a]) = background else {
+            return;
+        };
+        if right <= left || height == 0 {
+            return;
+        }
+
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(r, g, b, a);
+
+        let left = left.max(0) as f32;
+        let right = right.min(pixmap.width() as i32) as f32;
+        let width = right - left;
+        if width <= 0.0 {
+            return;
+        }
+
+        let vertical_padding = vertical_padding.min(height / 2);
+        let y = vertical_padding as f32;
+        let rect_height = height.saturating_sub(vertical_padding * 2) as f32;
+        if rect_height <= 0.0 {
+            return;
+        }
+        let rect = Rect::from_xywh(left, y, width, rect_height)
+            .expect("valid button background rectangle");
+        pixmap.fill_rect(rect, &paint, Transform::identity(), None);
     }
 
     fn measure_text(
@@ -164,6 +282,7 @@ impl<'a> BarRenderer<'a> {
         height: u32,
         font_size: f32,
         text_color: TextColor,
+        bold: bool,
     ) -> i32 {
         let line_height = font_size * 1.2857;
         let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
@@ -177,7 +296,7 @@ impl<'a> BarRenderer<'a> {
         if !self.config.font_family.is_empty() {
             attrs = attrs.family(Family::Name(&self.config.font_family));
         }
-        if self.config.bold {
+        if bold {
             attrs = attrs.weight(Weight::BOLD);
         }
         buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced);
@@ -197,6 +316,7 @@ impl<'a> BarRenderer<'a> {
         height: u32,
         font_size: f32,
         text_color: TextColor,
+        bold: bool,
     ) -> i32 {
         let line_height = font_size * 1.2857;
         let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
@@ -210,7 +330,7 @@ impl<'a> BarRenderer<'a> {
         if !self.config.font_family.is_empty() {
             attrs = attrs.family(Family::Name(&self.config.font_family));
         }
-        if self.config.bold {
+        if bold {
             attrs = attrs.weight(Weight::BOLD);
         }
         buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced);
@@ -253,6 +373,24 @@ impl<'a> BarRenderer<'a> {
     }
 }
 
+fn next_spacing(
+    items: &[(usize, usize, WidgetButton, i32)],
+    position: usize,
+    spacing: i32,
+    button_spacing: i32,
+) -> i32 {
+    items
+        .get(position + 1)
+        .map(|next| {
+            if items[position].0 == next.0 {
+                button_spacing
+            } else {
+                spacing
+            }
+        })
+        .unwrap_or(0)
+}
+
 #[derive(Clone, Copy)]
 enum Alignment {
     Left,
@@ -265,15 +403,17 @@ struct Hitbox {
     right: i32,
     alignment: Alignment,
     index: usize,
+    item: usize,
 }
 
 impl Hitbox {
-    fn new(left: i32, right: i32, alignment: Alignment, index: usize) -> Self {
+    fn new(left: i32, right: i32, alignment: Alignment, index: usize, item: usize) -> Self {
         Self {
             left,
             right,
             alignment,
             index,
+            item,
         }
     }
 
@@ -283,9 +423,9 @@ impl Hitbox {
 
     fn dispatch_click(&self, button: MouseButton, widgets: &mut WidgetGroups) {
         match self.alignment {
-            Alignment::Left => widgets.left[self.index].on_click(button),
-            Alignment::Center => widgets.center[self.index].on_click(button),
-            Alignment::Right => widgets.right[self.index].on_click(button),
+            Alignment::Left => widgets.left[self.index].on_click(button, self.item),
+            Alignment::Center => widgets.center[self.index].on_click(button, self.item),
+            Alignment::Right => widgets.right[self.index].on_click(button, self.item),
         }
     }
 

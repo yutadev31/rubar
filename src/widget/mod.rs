@@ -16,12 +16,26 @@ pub enum ScrollDirection {
     Down,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum WidgetContent {
+    Text(String),
+    Buttons(Vec<WidgetButton>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct WidgetButton {
+    pub text: String,
+    pub bold: Option<bool>,
+    pub color: Option<[u8; 4]>,
+    pub background: Option<[u8; 4]>,
+}
+
 pub trait Widget {
-    fn text(&mut self) -> String;
+    fn content(&mut self) -> WidgetContent;
 
     fn set_monitor_name(&mut self, _monitor_name: Option<&str>) {}
 
-    fn on_click(&mut self, _button: MouseButton) {}
+    fn on_click(&mut self, _button: MouseButton, _item: usize) {}
 
     fn on_scroll(&mut self, _direction: ScrollDirection) {}
 }

@@ -1,92 +1,55 @@
-use std::{
-    collections::HashMap,
-    io::{BufRead, BufReader, Read, Write},
-    os::unix::net::UnixStream,
-    path::PathBuf,
-    sync::{Arc, RwLock},
-    thread,
-    time::Duration,
-};
-
-use serde::Deserialize;
+use std::time::Duration;
 
 use crate::config::WorkspaceConfig;
 
-use super::Widget;
+use super::{Widget, WidgetButton, WidgetContent};
 
-#[derive(Debug)]
+pub mod provider;
+use provider::{WorkspaceProvider, WorkspaceState};
+
 pub struct Workspace {
     format: String,
+    active_color: [u8; 4],
+    active_background_color: [u8; 4],
     all_monitors: bool,
     monitor_name: Option<String>,
-    state: Arc<RwLock<Option<WorkspaceState>>>,
+    workspace_ids: Vec<i64>,
+    provider: Box<dyn WorkspaceProvider>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WorkspaceState {
-    workspaces: Vec<HyprWorkspace>,
-    active_id: i64,
-    active_monitor_id: i64,
-    active_ids: HashMap<String, i64>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-struct HyprWorkspace {
+#[derive(Debug, PartialEq, Eq)]
+struct RenderedWorkspace {
     id: i64,
-    name: String,
-    #[serde(rename = "monitorID")]
-    monitor_id: i64,
-    #[serde(default)]
-    monitor: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ActiveWorkspace {
-    id: i64,
-    #[serde(rename = "monitorID")]
-    monitor_id: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct HyprMonitor {
-    name: String,
-    #[serde(rename = "activeWorkspace")]
-    active_workspace: HyprActiveWorkspace,
-}
-
-#[derive(Debug, Deserialize)]
-struct HyprActiveWorkspace {
-    id: i64,
+    text: String,
+    active: bool,
+    active_on_monitor: bool,
 }
 
 impl Workspace {
     pub fn new(config: &WorkspaceConfig) -> Self {
-        let state = Arc::new(RwLock::new(None));
-        let reconnect_interval = Duration::from_secs(config.refresh_seconds.max(1));
-
-        match hyprland_socket_dir() {
-            Ok(socket_dir) => {
-                update_state(&socket_dir, &state);
-                let event_socket = socket_dir.join(".socket2.sock");
-                let command_socket = socket_dir.clone();
-                let shared_state = Arc::clone(&state);
-                thread::spawn(move || {
-                    event_loop(
-                        event_socket,
-                        command_socket,
-                        shared_state,
-                        reconnect_interval,
-                    )
-                });
-            }
-            Err(error) => eprintln!("rubar: could not locate Hyprland IPC sockets: {error}"),
-        }
-
+        let refresh_interval = Duration::from_secs(config.refresh_seconds.max(1));
         Self {
             format: config.format.clone(),
+            active_color: parse_color(&config.active_color).unwrap_or_else(|error| {
+                eprintln!(
+                    "rubar: invalid workspace active_color `{}`: {error}; using #0080ff",
+                    config.active_color
+                );
+                [0, 128, 255, 255]
+            }),
+            active_background_color: parse_color(&config.active_background_color).unwrap_or_else(
+                |error| {
+                    eprintln!(
+                        "rubar: invalid workspace active_background_color `{}`: {error}; using #414868",
+                        config.active_background_color
+                    );
+                    [65, 72, 104, 255]
+                },
+            ),
             all_monitors: config.all_monitors,
             monitor_name: None,
-            state,
+            workspace_ids: Vec::new(),
+            provider: provider::create(refresh_interval),
         }
     }
 }
@@ -96,128 +59,89 @@ impl Widget for Workspace {
         self.monitor_name = monitor_name.map(str::to_owned);
     }
 
-    fn text(&mut self) -> String {
-        let state = self.state.read().ok().and_then(|state| state.clone());
-        let Some(state) = state else {
-            return self.format.replace("{workspaces}", "--");
+    fn content(&mut self) -> WidgetContent {
+        let Some(state) = self.provider.state() else {
+            self.workspace_ids.clear();
+            return WidgetContent::Buttons(vec![WidgetButton {
+                text: self.format.replace("{workspaces}", "--"),
+                bold: Some(false),
+                color: None,
+                background: None,
+            }]);
         };
+
+        let active_id = state.active_id.to_string();
         let workspaces = render_workspaces(&state, self.monitor_name.as_deref(), self.all_monitors);
-        self.format
-            .replace("{workspaces}", &workspaces)
-            .replace("{active}", &state.active_id.to_string())
-    }
-}
-
-fn hyprland_socket_dir() -> Result<PathBuf, String> {
-    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .ok_or_else(|| "XDG_RUNTIME_DIR is not set".to_string())?;
-    let instance = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")
-        .ok_or_else(|| "HYPRLAND_INSTANCE_SIGNATURE is not set".to_string())?;
-    Ok(PathBuf::from(runtime_dir).join("hypr").join(instance))
-}
-
-fn event_loop(
-    event_socket: PathBuf,
-    command_socket: PathBuf,
-    state: Arc<RwLock<Option<WorkspaceState>>>,
-    reconnect_interval: Duration,
-) {
-    loop {
-        match UnixStream::connect(&event_socket) {
-            Ok(stream) => {
-                let reader = BufReader::new(stream);
-                for line in reader.lines() {
-                    match line {
-                        Ok(event) if is_workspace_event(&event) => {
-                            update_state(&command_socket, &state);
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            eprintln!("rubar: Hyprland event socket read failed: {error}");
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(error) => {
-                eprintln!("rubar: could not connect to Hyprland event socket: {error}");
-            }
-        }
-        thread::sleep(reconnect_interval);
-    }
-}
-
-fn is_workspace_event(event: &str) -> bool {
-    matches!(
-        event.split_once(">>").map(|(name, _)| name),
-        Some(
-            "workspace"
-                | "focusedmon"
-                | "createworkspace"
-                | "destroyworkspace"
-                | "moveworkspace"
-                | "renameworkspace"
-                | "activespecial"
-                | "activelayout"
+        self.workspace_ids = workspaces.iter().map(|workspace| workspace.id).collect();
+        WidgetContent::Buttons(
+            workspaces
+                .into_iter()
+                .map(|workspace| WidgetButton {
+                    text: self
+                        .format
+                        .replace("{workspaces}", &workspace.text)
+                        .replace("{active}", &active_id),
+                    bold: Some(workspace.active),
+                    // Only the active workspace on the active monitor uses the
+                    // configured accent color. Other monitors keep the bar's
+                    // normal text color, even when their workspace is active.
+                    color: if workspace.active_on_monitor {
+                        Some(self.active_color)
+                    } else {
+                        None
+                    },
+                    background: workspace.active.then_some(self.active_background_color),
+                })
+                .collect(),
         )
-    )
-}
+    }
 
-fn update_state(socket_dir: &PathBuf, state: &Arc<RwLock<Option<WorkspaceState>>>) {
-    match read_state(socket_dir) {
-        Ok(new_state) => {
-            if let Ok(mut state) = state.write() {
-                *state = Some(new_state);
-            }
+    fn on_click(&mut self, button: super::MouseButton, item: usize) {
+        if button != super::MouseButton::Left {
+            return;
         }
-        Err(error) => eprintln!("rubar: could not read Hyprland workspace state: {error}"),
+        let Some(workspace_id) = self.workspace_ids.get(item).copied() else {
+            return;
+        };
+        if let Err(error) = self.provider.switch_to(workspace_id) {
+            eprintln!("rubar: could not switch to workspace {workspace_id}: {error}");
+        }
     }
 }
 
-fn read_state(socket_dir: &PathBuf) -> Result<WorkspaceState, String> {
-    let mut workspaces = request_json::<Vec<HyprWorkspace>>(socket_dir, "j/workspaces")?;
-    workspaces.sort_by_key(|workspace| workspace.id);
-    let active = request_json::<ActiveWorkspace>(socket_dir, "j/activeworkspace")?;
-    let monitors = request_json::<Vec<HyprMonitor>>(socket_dir, "j/monitors").unwrap_or_default();
-    let active_ids = monitors
-        .into_iter()
-        .map(|monitor| (monitor.name, monitor.active_workspace.id))
-        .collect();
-    Ok(WorkspaceState {
-        workspaces,
-        active_id: active.id,
-        active_monitor_id: active.monitor_id,
-        active_ids,
-    })
-}
-
-fn request_json<T>(socket_dir: &PathBuf, request: &str) -> Result<T, String>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let socket = socket_dir.join(".socket.sock");
-    let mut stream = UnixStream::connect(&socket)
-        .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|error| format!("could not write to {}: {error}", socket.display()))?;
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|error| format!("could not read from {}: {error}", socket.display()))?;
-    serde_json::from_str(&response)
-        .map_err(|error| format!("could not parse Hyprland response: {error}"))
+fn parse_color(value: &str) -> Result<[u8; 4], String> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    let (rgb, alpha) = match hex.len() {
+        6 => (hex, 255),
+        8 => (
+            &hex[..6],
+            u8::from_str_radix(&hex[6..], 16).map_err(|error| error.to_string())?,
+        ),
+        _ => return Err("expected #RRGGBB or #RRGGBBAA".to_string()),
+    };
+    Ok([
+        u8::from_str_radix(&rgb[0..2], 16).map_err(|error| error.to_string())?,
+        u8::from_str_radix(&rgb[2..4], 16).map_err(|error| error.to_string())?,
+        u8::from_str_radix(&rgb[4..6], 16).map_err(|error| error.to_string())?,
+        alpha,
+    ])
 }
 
 fn render_workspaces(
     state: &WorkspaceState,
     monitor_name: Option<&str>,
     all_monitors: bool,
-) -> String {
+) -> Vec<RenderedWorkspace> {
     let mut monitor_indices = std::collections::HashMap::new();
+    // Each bar should bold the workspace currently shown on its monitor,
+    // independently of which monitor is globally focused.
     let active_id = monitor_name
         .and_then(|name| state.active_ids.get(name).copied())
         .unwrap_or(state.active_id);
+    // Only the globally focused workspace gets the accent color. A bar on an
+    // inactive monitor must not treat that monitor's active workspace as the
+    // globally active one.
+    let globally_active_id = state.active_id;
     state
         .workspaces
         .iter()
@@ -231,26 +155,26 @@ fn render_workspaces(
         .map(|workspace| {
             let index = monitor_indices.entry(workspace.monitor_id).or_insert(0);
             *index += 1;
-            let name = if workspace.name.parse::<i64>().is_ok() {
+            let text = if workspace.name.parse::<i64>().is_ok() {
                 index.to_string()
             } else {
                 workspace.name.clone()
             };
-            if workspace.id == active_id {
-                format!("[{name}]")
-            } else {
-                name
+            RenderedWorkspace {
+                id: workspace.id,
+                text,
+                active: workspace.id == active_id,
+                active_on_monitor: workspace.id == globally_active_id,
             }
         })
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use super::{HyprWorkspace, WorkspaceState, is_workspace_event, render_workspaces};
+    use super::{RenderedWorkspace, WorkspaceState, provider::HyprWorkspace, render_workspaces};
 
     #[test]
     fn workspaces_are_rendered_with_active_workspace_marked() {
@@ -279,15 +203,54 @@ mod tests {
             active_monitor_id: 0,
             active_ids: HashMap::from([("DP-1".to_string(), 2), ("HDMI-A-1".to_string(), 11)]),
         };
-        assert_eq!(render_workspaces(&state, None, false), "1 [2]");
-        assert_eq!(render_workspaces(&state, None, true), "1 [2] 1");
-        assert_eq!(render_workspaces(&state, Some("HDMI-A-1"), false), "[1]");
-    }
-
-    #[test]
-    fn only_workspace_events_trigger_refresh() {
-        assert!(is_workspace_event("workspace>>2"));
-        assert!(is_workspace_event("createworkspace>>3"));
-        assert!(!is_workspace_event("openwindow>>address>>workspace"));
+        assert_eq!(
+            render_workspaces(&state, None, false),
+            vec![
+                RenderedWorkspace {
+                    id: 1,
+                    text: "1".to_string(),
+                    active: false,
+                    active_on_monitor: false
+                },
+                RenderedWorkspace {
+                    id: 2,
+                    text: "dev".to_string(),
+                    active: true,
+                    active_on_monitor: true
+                },
+            ]
+        );
+        assert_eq!(
+            render_workspaces(&state, None, true),
+            vec![
+                RenderedWorkspace {
+                    id: 1,
+                    text: "1".to_string(),
+                    active: false,
+                    active_on_monitor: false
+                },
+                RenderedWorkspace {
+                    id: 2,
+                    text: "dev".to_string(),
+                    active: true,
+                    active_on_monitor: true
+                },
+                RenderedWorkspace {
+                    id: 11,
+                    text: "1".to_string(),
+                    active: false,
+                    active_on_monitor: false
+                },
+            ]
+        );
+        assert_eq!(
+            render_workspaces(&state, Some("HDMI-A-1"), false),
+            vec![RenderedWorkspace {
+                id: 11,
+                text: "1".to_string(),
+                active: true,
+                active_on_monitor: false
+            }]
+        );
     }
 }

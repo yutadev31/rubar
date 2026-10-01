@@ -38,6 +38,8 @@ pub struct VolumeConfig {
 #[serde(default)]
 pub struct WorkspaceConfig {
     pub format: String,
+    pub active_color: String,
+    pub active_background_color: String,
     pub refresh_seconds: u64,
     pub all_monitors: bool,
 }
@@ -52,6 +54,9 @@ pub struct StyleConfig {
     pub bold: bool,
     pub padding: u32,
     pub spacing: u32,
+    pub button_padding: u32,
+    pub button_vertical_padding: u32,
+    pub button_spacing: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +88,9 @@ impl Default for StyleConfig {
             bold: false,
             padding: 8,
             spacing: 16,
+            button_padding: 12,
+            button_vertical_padding: 0,
+            button_spacing: 0,
         }
     }
 }
@@ -127,7 +135,9 @@ impl Default for VolumeConfig {
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
-            format: "WS {workspaces}".to_string(),
+            format: "{workspaces}".to_string(),
+            active_color: "#7aa2f7".to_string(),
+            active_background_color: "#414868".to_string(),
             refresh_seconds: 1,
             // A bar now exists on every output, so the workspace module should
             // expose the complete Hyprland workspace state by default. Users
