@@ -31,6 +31,7 @@ pub struct StyleConfig {
     pub height: u32,
     pub font_size: f32,
     pub font_family: String,
+    pub bold: bool,
     pub padding: u32,
     pub spacing: u32,
 }
@@ -56,11 +57,12 @@ impl Default for StyleConfig {
     fn default() -> Self {
         Self {
             colors: ColorsConfig::default(),
-            height: 28,
+            height: 30,
             font_size: 14.0,
             font_family: String::new(),
+            bold: false,
             padding: 8,
-            spacing: 8,
+            spacing: 16,
         }
     }
 }
@@ -68,8 +70,8 @@ impl Default for StyleConfig {
 impl Default for ColorsConfig {
     fn default() -> Self {
         Self {
-            bg: "#1f232b".to_string(),
-            text: "#ffffff".to_string(),
+            bg: "#24283b".to_string(),
+            text: "#c0caf5".to_string(),
         }
     }
 }

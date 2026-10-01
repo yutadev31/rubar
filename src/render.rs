@@ -1,7 +1,8 @@
 use std::error::Error;
 
 use cosmic_text::{
-    Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap,
+    Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
+    Wrap,
 };
 use tiny_skia::{Color, Pixmap};
 
@@ -79,13 +80,13 @@ impl<'a> BarRenderer<'a> {
             Some(height as f32),
         );
         buffer.set_wrap(&mut self.font_system, Wrap::None);
-        let attrs = if self.config.font_family.is_empty() {
-            Attrs::new().color(text_color)
-        } else {
-            Attrs::new()
-                .family(Family::Name(&self.config.font_family))
-                .color(text_color)
-        };
+        let mut attrs = Attrs::new().color(text_color);
+        if !self.config.font_family.is_empty() {
+            attrs = attrs.family(Family::Name(&self.config.font_family));
+        }
+        if self.config.bold {
+            attrs = attrs.weight(Weight::BOLD);
+        }
         buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced);
         buffer.shape_until_scroll(&mut self.font_system, false);
         let text_width = buffer
