@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Read, Write},
+    net::Shutdown,
     os::unix::net::UnixStream,
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -96,12 +97,42 @@ impl WorkspaceProvider for HyprlandProvider {
 
     fn switch_to(&mut self, workspace_id: i64) -> Result<(), String> {
         let socket = self.socket_dir.join(".socket.sock");
-        let mut stream = UnixStream::connect(&socket)
-            .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
-        stream
-            .write_all(format!("dispatch workspace {workspace_id}").as_bytes())
-            .map_err(|error| format!("could not switch to workspace {workspace_id}: {error}"))
+        let legacy_command = format!("dispatch workspace {workspace_id}");
+        let response = send_command(&socket, &legacy_command)
+            .map_err(|error| format!("could not switch to workspace {workspace_id}: {error}"))?;
+        if !response.starts_with("error") {
+            return Ok(());
+        }
+
+        // Hyprland 0.55+ with a Lua config evaluates `dispatch` as a Lua
+        // expression and no longer accepts the legacy dispatcher syntax.
+        let lua_command = format!("dispatch hl.dsp.focus({{ workspace = \"{workspace_id}\" }})");
+        let response = send_command(&socket, &lua_command)
+            .map_err(|error| format!("could not switch to workspace {workspace_id}: {error}"))?;
+        if response.starts_with("error") {
+            return Err(format!(
+                "Hyprland rejected workspace {workspace_id}: {response}"
+            ));
+        }
+        Ok(())
     }
+}
+
+fn send_command(socket: &PathBuf, command: &str) -> Result<String, String> {
+    let mut stream = UnixStream::connect(socket)
+        .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
+    stream
+        .write_all(command.as_bytes())
+        .map_err(|error| format!("could not write command: {error}"))?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| format!("could not finish command: {error}"))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("could not read command response: {error}"))?;
+    Ok(response)
 }
 
 struct Unavailable;
