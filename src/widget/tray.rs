@@ -171,10 +171,7 @@ fn run_watcher(state: State) {
     let property_state = state.clone();
     if connection
         .add_match(
-            MatchRule::new_signal(
-                "org.freedesktop.DBus.Properties",
-                "PropertiesChanged",
-            ),
+            MatchRule::new_signal("org.freedesktop.DBus.Properties", "PropertiesChanged"),
             move |_: (String, dbus::arg::PropMap, Vec<String>),
                   _connection: &Connection,
                   message: &Message| {

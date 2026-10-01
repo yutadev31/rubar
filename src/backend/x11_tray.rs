@@ -4,7 +4,15 @@
 //! clients.  Keeping the host here means the bar itself does not need to know
 //! anything about foreign windows; it only reserves the space they occupy.
 
-use std::error::Error;
+use std::{
+    error::Error,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Duration,
+};
 
 use x11rb::{
     connection::Connection,
@@ -28,6 +36,99 @@ pub struct Tray {
     icons: Vec<u32>,
     height: u32,
     config: TrayConfig,
+}
+
+/// Run an XEmbed tray independently of the bar's window-system event loop.
+///
+/// A Wayland surface cannot contain an X11 child window.  Xwayland can still
+/// present an XEmbed host as a separate X11 surface, though, so keeping this
+/// loop separate lets legacy tray clients continue to work whenever a
+/// `DISPLAY` is available (normally through Xwayland).
+pub(crate) struct TrayThread {
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl TrayThread {
+    pub(crate) fn spawn(config: &TrayConfig) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let config = TrayConfig {
+            enabled: config.enabled,
+            icon_size: config.icon_size,
+            spacing: config.spacing,
+        };
+        let thread = thread::Builder::new()
+            .name("rubar-xembed-tray".to_string())
+            .spawn(move || run_standalone(config, thread_stop))
+            .ok();
+        Self { stop, thread }
+    }
+}
+
+impl Drop for TrayThread {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn run_standalone(config: TrayConfig, stop: Arc<AtomicBool>) {
+    let Ok((connection, screen_number)) = RustConnection::connect(None) else {
+        // DISPLAY is optional in a Wayland session.  In that case there is no
+        // XEmbed client universe to host, so the StatusNotifier tray remains
+        // the only available tray implementation.
+        return;
+    };
+    let screen = &connection.setup().roots[screen_number];
+    let screen_width = u32::from(screen.width_in_pixels);
+    let Some(mut tray) = (match Tray::new(&connection, screen, &config) {
+        Ok(tray) => tray,
+        Err(error) => {
+            eprintln!("rubar: could not start XEmbed tray: {error}");
+            return;
+        }
+    }) else {
+        return;
+    };
+
+    // Start off-screen while empty, then keep the host flush against the
+    // right edge as icons arrive or disappear.
+    tray.hide(&connection);
+    let _ = tray.place(&connection, screen_width, 0);
+    while !stop.load(Ordering::Acquire) {
+        let mut changed = false;
+        loop {
+            let event = match connection.poll_for_event() {
+                Ok(Some(event)) => event,
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("rubar: XEmbed tray event loop stopped: {error}");
+                    return;
+                }
+            };
+            let old_width = tray.width();
+            match tray.handle_event(&connection, &event) {
+                Ok(true) => changed |= old_width != tray.width(),
+                Ok(false) => return,
+                Err(error) => {
+                    eprintln!("rubar: XEmbed tray event handling failed: {error}");
+                    return;
+                }
+            }
+        }
+        if changed {
+            if tray.width() == 0 {
+                tray.hide(&connection);
+            } else {
+                tray.show(&connection);
+                let _ = tray.place(&connection, screen_width.saturating_sub(tray.width()), 0);
+            }
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 impl Tray {
@@ -63,6 +164,9 @@ impl Tray {
             0,
             &CreateWindowAux::new()
                 .background_pixel(screen.black_pixel)
+                // The Wayland/Xwayland host must not acquire a decorated,
+                // managed top-level surface of its own.
+                .override_redirect(1)
                 .event_mask(
                     EventMask::STRUCTURE_NOTIFY
                         | EventMask::SUBSTRUCTURE_NOTIFY
@@ -163,6 +267,16 @@ impl Tray {
         )?;
         connection.flush()?;
         Ok(())
+    }
+
+    fn show(&self, connection: &RustConnection) {
+        let _ = connection.map_window(self.window);
+        let _ = connection.flush();
+    }
+
+    fn hide(&self, connection: &RustConnection) {
+        let _ = connection.unmap_window(self.window);
+        let _ = connection.flush();
     }
 
     fn dock(&mut self, connection: &RustConnection, icon: u32) -> Result<(), Box<dyn Error>> {

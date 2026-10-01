@@ -32,8 +32,12 @@ impl Backend for WaylandBackend {
         &mut self,
         renderer: &mut BarRenderer,
         widgets: &mut WidgetGroups,
-        _tray: &TrayConfig,
+        tray: &TrayConfig,
     ) -> Result<(), Box<dyn Error>> {
+        // Legacy X11 tray clients use XEmbed rather than D-Bus.  When this
+        // Wayland session also has Xwayland, host those clients in parallel
+        // with the native StatusNotifier widget.
+        let _xembed_tray = crate::backend::x11_tray::TrayThread::spawn(tray);
         let connection = Connection::connect_to_env()?;
         let (globals, mut event_queue) = registry_queue_init::<State>(&connection)?;
         let qh = event_queue.handle();
