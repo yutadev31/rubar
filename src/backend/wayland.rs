@@ -18,8 +18,8 @@ use wayland_client::{
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::Backend;
+use crate::render::BarRenderer;
 use crate::widget::{MouseButton, ScrollDirection, WidgetGroups};
-use crate::{config::TrayConfig, render::BarRenderer};
 
 const WIDTH_FALLBACK: u32 = 1280;
 const REDRAW_INTERVAL: Duration = Duration::from_millis(16);
@@ -32,12 +32,7 @@ impl Backend for WaylandBackend {
         &mut self,
         renderer: &mut BarRenderer,
         widgets: &mut WidgetGroups,
-        tray: &TrayConfig,
     ) -> Result<(), Box<dyn Error>> {
-        // Legacy X11 tray clients use XEmbed rather than D-Bus.  When this
-        // Wayland session also has Xwayland, host those clients in parallel
-        // with the native StatusNotifier widget.
-        let _xembed_tray = crate::backend::x11_tray::TrayThread::spawn(tray);
         let connection = Connection::connect_to_env()?;
         let (globals, mut event_queue) = registry_queue_init::<State>(&connection)?;
         let qh = event_queue.handle();

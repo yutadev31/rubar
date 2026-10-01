@@ -11,7 +11,6 @@ pub struct Config {
     pub volume: VolumeConfig,
     pub workspace: WorkspaceConfig,
     pub style: StyleConfig,
-    pub tray: TrayConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,14 +79,6 @@ pub struct ColorsConfig {
     pub text: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct TrayConfig {
-    pub enabled: bool,
-    pub icon_size: u32,
-    pub spacing: u32,
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -97,7 +88,6 @@ impl Default for Config {
             volume: VolumeConfig::default(),
             workspace: WorkspaceConfig::default(),
             style: StyleConfig::default(),
-            tray: TrayConfig::default(),
         }
     }
 }
@@ -124,16 +114,6 @@ impl Default for ColorsConfig {
         Self {
             bg: "#24283b".to_string(),
             text: "#c0caf5".to_string(),
-        }
-    }
-}
-
-impl Default for TrayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            icon_size: 22,
-            spacing: 4,
         }
     }
 }

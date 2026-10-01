@@ -1,6 +1,5 @@
 pub mod battery;
 pub mod clock;
-pub mod tray;
 pub mod volume;
 pub mod workspace;
 
@@ -27,19 +26,10 @@ pub enum WidgetContent {
 #[derive(Debug, PartialEq, Eq)]
 pub struct WidgetButton {
     pub text: Option<String>,
-    pub icon: Option<WidgetIcon>,
     pub padding: Option<u32>,
     pub bold: Option<bool>,
     pub color: Option<[u8; 4]>,
     pub background: Option<[u8; 4]>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WidgetIcon {
-    pub width: u32,
-    pub height: u32,
-    /// Premultiplied-independent ARGB bytes, four bytes per pixel.
-    pub pixels: Vec<u8>,
 }
 
 pub trait Widget {

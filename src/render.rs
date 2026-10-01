@@ -119,7 +119,6 @@ impl<'a> BarRenderer<'a> {
             let buttons = match content {
                 WidgetContent::Text(text) => vec![WidgetButton {
                     text: Some(text),
-                    icon: None,
                     padding: None,
                     bold: None,
                     color: None,
@@ -139,14 +138,7 @@ impl<'a> BarRenderer<'a> {
                     )
                 });
                 let button_padding = button.padding.unwrap_or(self.config.button_padding) as i32;
-                let icon_width = button.icon.as_ref().map_or(0, |icon| icon.width as i32 + 4);
-                items.push((
-                    index,
-                    button_index,
-                    button,
-                    text_width + icon_width,
-                    button_padding,
-                ));
+                items.push((index, button_index, button, text_width, button_padding));
             }
         }
 
@@ -183,11 +175,9 @@ impl<'a> BarRenderer<'a> {
         {
             let index = *index;
             let button_index = *button_index;
-            let content_width = *text_width;
+            let text_width = *text_width;
             let button_padding = *button_padding;
-            let icon_width = button.icon.as_ref().map_or(0, |icon| icon.width as i32 + 4);
-            let text_width = content_width - icon_width;
-            let button_width = content_width + button_padding * 2;
+            let button_width = text_width + button_padding * 2;
             let bold = button.bold.unwrap_or(self.config.bold);
             let button_color = button
                 .color
@@ -221,14 +211,6 @@ impl<'a> BarRenderer<'a> {
                             bold,
                         );
                     }
-                    if let Some(icon) = &button.icon {
-                        self.draw_icon(
-                            pixmap,
-                            icon,
-                            cursor - button_padding - text_width - 4,
-                            height,
-                        );
-                    }
                     cursor -=
                         button_width + next_spacing(&items, position, spacing, button_spacing);
                 }
@@ -252,19 +234,11 @@ impl<'a> BarRenderer<'a> {
                         self.draw_text(
                             pixmap,
                             text,
-                            cursor + button_padding + icon_width + text_width,
+                            cursor + button_padding + text_width,
                             height,
                             font_size,
                             button_color,
                             bold,
-                        );
-                    }
-                    if let Some(icon) = &button.icon {
-                        self.draw_icon(
-                            pixmap,
-                            icon,
-                            cursor + button_padding + icon.width as i32,
-                            height,
                         );
                     }
                     cursor +=
@@ -309,46 +283,6 @@ impl<'a> BarRenderer<'a> {
         let rect = Rect::from_xywh(left, y, width, rect_height)
             .expect("valid button background rectangle");
         pixmap.fill_rect(rect, &paint, Transform::identity(), None);
-    }
-
-    fn draw_icon(
-        &self,
-        pixmap: &mut Pixmap,
-        icon: &crate::widget::WidgetIcon,
-        right: i32,
-        height: u32,
-    ) {
-        let scale = (height.saturating_sub(4) as f32 / icon.height.max(1) as f32).min(1.0);
-        let width = (icon.width as f32 * scale).round().max(1.0) as u32;
-        let draw_height = (icon.height as f32 * scale).round().max(1.0) as u32;
-        let x0 = right - width as i32;
-        let y0 = ((height.saturating_sub(draw_height)) / 2) as i32;
-        for y in 0..draw_height {
-            for x in 0..width {
-                let sx = (x as f32 / scale) as u32;
-                let sy = (y as f32 / scale) as u32;
-                let source = ((sy * icon.width + sx) * 4) as usize;
-                if source + 3 >= icon.pixels.len() {
-                    continue;
-                }
-                let a = icon.pixels[source] as u16;
-                let r = icon.pixels[source + 1];
-                let g = icon.pixels[source + 2];
-                let b = icon.pixels[source + 3];
-                let px = x0 + x as i32;
-                let py = y0 + y as i32;
-                if px < 0 || py < 0 || px >= pixmap.width() as i32 || py >= pixmap.height() as i32 {
-                    continue;
-                }
-                let dest = (py as u32 * pixmap.width() + px as u32) as usize * 4;
-                let inv = 255 - a;
-                let data = pixmap.data_mut();
-                data[dest] = ((r as u16 * a + data[dest] as u16 * inv) / 255) as u8;
-                data[dest + 1] = ((g as u16 * a + data[dest + 1] as u16 * inv) / 255) as u8;
-                data[dest + 2] = ((b as u16 * a + data[dest + 2] as u16 * inv) / 255) as u8;
-                data[dest + 3] = 255;
-            }
-        }
     }
 
     fn measure_text(
