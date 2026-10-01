@@ -32,6 +32,9 @@ pub struct ModulesConfig {
 pub struct VolumeConfig {
     pub provider: String,
     pub format: String,
+    pub muted_format: String,
+    pub microphone_format: String,
+    pub microphone_muted_format: String,
     pub refresh_seconds: u64,
 }
 
@@ -137,6 +140,9 @@ impl Default for VolumeConfig {
         Self {
             provider: "pulseaudio".to_string(),
             format: "VOL {volume}%".to_string(),
+            muted_format: "VOL [M]".to_string(),
+            microphone_format: " MIC {volume}%".to_string(),
+            microphone_muted_format: " MIC [M]".to_string(),
             refresh_seconds: 1,
         }
     }

@@ -431,9 +431,9 @@ impl Hitbox {
 
     fn dispatch_scroll(&self, direction: ScrollDirection, widgets: &mut WidgetGroups) {
         match self.alignment {
-            Alignment::Left => widgets.left[self.index].on_scroll(direction),
-            Alignment::Center => widgets.center[self.index].on_scroll(direction),
-            Alignment::Right => widgets.right[self.index].on_scroll(direction),
+            Alignment::Left => widgets.left[self.index].on_scroll(direction, self.item),
+            Alignment::Center => widgets.center[self.index].on_scroll(direction, self.item),
+            Alignment::Right => widgets.right[self.index].on_scroll(direction, self.item),
         }
     }
 }

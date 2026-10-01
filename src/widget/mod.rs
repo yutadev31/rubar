@@ -38,7 +38,7 @@ pub trait Widget {
 
     fn on_click(&mut self, _button: MouseButton, _item: usize) {}
 
-    fn on_scroll(&mut self, _direction: ScrollDirection) {}
+    fn on_scroll(&mut self, _direction: ScrollDirection, _item: usize) {}
 }
 
 pub struct WidgetGroups {
