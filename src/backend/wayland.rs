@@ -1,4 +1,9 @@
-use std::{error::Error, os::fd::AsFd, sync::Arc};
+use std::{
+    error::Error,
+    os::fd::AsFd,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use memmap2::MmapMut;
 use wayland_client::{
@@ -17,6 +22,7 @@ use crate::render::BarRenderer;
 use crate::widget::{MouseButton, ScrollDirection, WidgetGroups};
 
 const WIDTH_FALLBACK: u32 = 1280;
+const REDRAW_INTERVAL: Duration = Duration::from_millis(16);
 
 #[derive(Default)]
 pub struct WaylandBackend;
@@ -95,6 +101,9 @@ impl Backend for WaylandBackend {
             let pointer_events = std::mem::take(&mut state.pending_pointer_events);
             if !pointer_events.is_empty() {
                 state.needs_redraw = true;
+                for bar in &mut state.bars {
+                    bar.needs_redraw = true;
+                }
             }
             for event in pointer_events {
                 match event {
@@ -143,6 +152,8 @@ struct BarState {
     width: u32,
     monitor_name: Option<String>,
     needs_redraw: bool,
+    last_draw: Instant,
+    last_pixels: Option<Vec<u8>>,
 }
 
 impl BarState {
@@ -160,6 +171,8 @@ impl BarState {
             width: WIDTH_FALLBACK,
             monitor_name: None,
             needs_redraw: false,
+            last_draw: Instant::now(),
+            last_pixels: None,
         }
     }
 }
@@ -213,11 +226,22 @@ impl State {
         widgets.set_monitor_name(monitor_name.as_deref());
         let height = renderer.height();
         let stride = width * 4;
+        let pixels = renderer.render(width, height, widgets);
+
+        if self.bars[index].last_pixels.as_ref() == Some(&pixels) {
+            let bar = &mut self.bars[index];
+            bar.frame_callback = Some(bar.surface.frame(qh, ()));
+            bar.surface.damage_buffer(0, 0, 1, 1);
+            bar.surface.commit();
+            bar.needs_redraw = false;
+            bar.last_draw = Instant::now();
+            return Ok(());
+        }
+
         let size = stride * height;
         let file = tempfile::tempfile()?;
         file.set_len(size as u64)?;
         let mut mapping = unsafe { MmapMut::map_mut(&file)? };
-        let pixels = renderer.render(width, height, widgets);
         mapping.copy_from_slice(&pixels);
 
         let pool = self.shm.create_pool(file.as_fd(), size as i32, qh, ());
@@ -241,6 +265,8 @@ impl State {
             _mapping: Arc::new(mapping),
         });
         bar.needs_redraw = false;
+        bar.last_draw = Instant::now();
+        bar.last_pixels = Some(pixels);
         Ok(())
     }
 
@@ -339,7 +365,15 @@ impl Dispatch<wl_callback::WlCallback, ()> for State {
                 .find(|bar| bar.frame_callback.as_ref() == Some(proxy))
             {
                 bar.frame_callback = None;
-                bar.needs_redraw = true;
+                if bar.last_draw.elapsed() < REDRAW_INTERVAL && !bar.needs_redraw {
+                    // Keep the frame callback as a low-frequency timer without
+                    // allocating another shm buffer for every compositor frame.
+                    bar.frame_callback = Some(bar.surface.frame(_qh, ()));
+                    bar.surface.damage_buffer(0, 0, 1, 1);
+                    bar.surface.commit();
+                } else {
+                    bar.needs_redraw = true;
+                }
             }
         }
     }
