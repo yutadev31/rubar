@@ -31,6 +31,7 @@
           rust
           taplo
           nixd
+          nixfmt
           typos-lsp
           pkg-config
         ];
