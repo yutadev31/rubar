@@ -129,7 +129,10 @@ impl Default for WorkspaceConfig {
         Self {
             format: "WS {workspaces}".to_string(),
             refresh_seconds: 1,
-            all_monitors: false,
+            // A bar now exists on every output, so the workspace module should
+            // expose the complete Hyprland workspace state by default. Users
+            // who prefer the focused monitor only can still set this to false.
+            all_monitors: true,
         }
     }
 }
