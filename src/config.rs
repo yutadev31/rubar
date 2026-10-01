@@ -6,6 +6,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
+    pub battery: BatteryConfig,
     pub modules: ModulesConfig,
     pub volume: VolumeConfig,
     pub workspace: WorkspaceConfig,
@@ -29,6 +30,14 @@ pub struct ModulesConfig {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct VolumeConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct BatteryConfig {
     pub provider: String,
     pub format: String,
     pub refresh_seconds: u64,
@@ -70,6 +79,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             clock: ClockConfig::default(),
+            battery: BatteryConfig::default(),
             modules: ModulesConfig::default(),
             volume: VolumeConfig::default(),
             workspace: WorkspaceConfig::default(),
@@ -128,6 +138,16 @@ impl Default for VolumeConfig {
             provider: "pulseaudio".to_string(),
             format: "VOL {volume}%".to_string(),
             refresh_seconds: 1,
+        }
+    }
+}
+
+impl Default for BatteryConfig {
+    fn default() -> Self {
+        Self {
+            provider: "sysfs".to_string(),
+            format: "BAT {percent}%".to_string(),
+            refresh_seconds: 30,
         }
     }
 }

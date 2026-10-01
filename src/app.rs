@@ -5,7 +5,7 @@ use crate::{
     backend::{self, Backend},
     config::Config,
     render::BarRenderer,
-    widget::{WidgetGroups, clock::Clock, volume::Volume, workspace::Workspace},
+    widget::{WidgetGroups, battery::Battery, clock::Clock, volume::Volume, workspace::Workspace},
 };
 
 pub struct App<'a> {
@@ -46,6 +46,9 @@ fn create_widgets(
         .iter()
         .map(|name| match name.as_str() {
             "clock" => Ok(Box::new(Clock::new(&config.clock)) as Box<dyn crate::widget::Widget>),
+            "battery" => {
+                Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>)
+            }
             "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
             "workspace" => {
                 Ok(Box::new(Workspace::new(&config.workspace)) as Box<dyn crate::widget::Widget>)
