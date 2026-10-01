@@ -1,5 +1,6 @@
 pub mod clock;
 pub mod volume;
+pub mod workspace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseButton {

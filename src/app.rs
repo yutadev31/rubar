@@ -4,7 +4,7 @@ use crate::{
     backend::{self, Backend},
     config::Config,
     render::BarRenderer,
-    widget::{WidgetGroups, clock::Clock, volume::Volume},
+    widget::{WidgetGroups, clock::Clock, volume::Volume, workspace::Workspace},
 };
 
 pub struct App<'a> {
@@ -41,6 +41,9 @@ fn create_widgets(
         .map(|name| match name.as_str() {
             "clock" => Ok(Box::new(Clock::new(&config.clock)) as Box<dyn crate::widget::Widget>),
             "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
+            "workspace" => {
+                Ok(Box::new(Workspace::new(&config.workspace)) as Box<dyn crate::widget::Widget>)
+            }
             _ => Err(format!("unknown module `{name}`").into()),
         })
         .collect()

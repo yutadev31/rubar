@@ -8,6 +8,7 @@ pub struct Config {
     pub clock: ClockConfig,
     pub modules: ModulesConfig,
     pub volume: VolumeConfig,
+    pub workspace: WorkspaceConfig,
     pub style: StyleConfig,
 }
 
@@ -29,6 +30,13 @@ pub struct ModulesConfig {
 #[serde(default)]
 pub struct VolumeConfig {
     pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct WorkspaceConfig {
     pub format: String,
     pub refresh_seconds: u64,
 }
@@ -58,6 +66,7 @@ impl Default for Config {
             clock: ClockConfig::default(),
             modules: ModulesConfig::default(),
             volume: VolumeConfig::default(),
+            workspace: WorkspaceConfig::default(),
             style: StyleConfig::default(),
         }
     }
@@ -109,6 +118,15 @@ impl Default for VolumeConfig {
         Self {
             provider: "pulseaudio".to_string(),
             format: "VOL {volume}%".to_string(),
+            refresh_seconds: 1,
+        }
+    }
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            format: "WS {workspaces}".to_string(),
             refresh_seconds: 1,
         }
     }
