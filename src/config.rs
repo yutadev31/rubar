@@ -30,6 +30,7 @@ pub struct StyleConfig {
     pub colors: ColorsConfig,
     pub height: u32,
     pub font_size: f32,
+    pub font_family: String,
     pub padding: u32,
     pub spacing: u32,
 }
@@ -57,6 +58,7 @@ impl Default for StyleConfig {
             colors: ColorsConfig::default(),
             height: 28,
             font_size: 14.0,
+            font_family: String::new(),
             padding: 8,
             spacing: 8,
         }
