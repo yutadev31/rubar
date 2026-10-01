@@ -23,6 +23,13 @@ pub struct BarRenderer<'a> {
     hitboxes: Vec<Hitbox>,
 }
 
+struct RenderMetrics {
+    width: u32,
+    height: u32,
+    font_size: f32,
+    text_color: TextColor,
+}
+
 impl<'a> BarRenderer<'a> {
     pub fn new(config: &'a StyleConfig) -> Self {
         Self {
@@ -42,43 +49,29 @@ impl<'a> BarRenderer<'a> {
         let background = parse_color(&self.config.colors.bg).expect("validated background color");
         let text = parse_rgba(&self.config.colors.text).expect("validated text color");
         let text_color = TextColor::rgba(text[0], text[1], text[2], text[3]);
-        let font_size = self.config.font_size.max(1.0);
+        let metrics = RenderMetrics {
+            width,
+            height,
+            font_size: self.config.font_size.max(1.0),
+            text_color,
+        };
         pixmap.fill(background);
         self.hitboxes.clear();
 
-        self.draw_group(
-            &mut pixmap,
-            &mut widgets.left,
-            width,
-            height,
-            font_size,
-            text_color,
-            Alignment::Left,
-        );
+        self.draw_group(&mut pixmap, &mut widgets.left, &metrics, Alignment::Left);
         self.draw_group(
             &mut pixmap,
             &mut widgets.center,
-            width,
-            height,
-            font_size,
-            text_color,
+            &metrics,
             Alignment::Center,
         );
-        self.draw_group(
-            &mut pixmap,
-            &mut widgets.right,
-            width,
-            height,
-            font_size,
-            text_color,
-            Alignment::Right,
-        );
+        self.draw_group(&mut pixmap, &mut widgets.right, &metrics, Alignment::Right);
 
         // tiny-skia stores RGBA pixels. On little-endian machines Wayland's
         // ARGB8888 shm format is laid out as B,G,R,A, so convert explicitly.
-        pixmap
-            .data()
-            .chunks_exact(4)
+        let (pixels, _) = pixmap.data().as_chunks::<4>();
+        pixels
+            .iter()
             .flat_map(|rgba| [rgba[2], rgba[1], rgba[0], rgba[3]])
             .collect()
     }
@@ -107,10 +100,7 @@ impl<'a> BarRenderer<'a> {
         &mut self,
         pixmap: &mut Pixmap,
         widgets: &mut [Box<dyn Widget>],
-        width: u32,
-        height: u32,
-        font_size: f32,
-        text_color: TextColor,
+        metrics: &RenderMetrics,
         alignment: Alignment,
     ) {
         let mut items = Vec::with_capacity(widgets.len());
@@ -128,14 +118,7 @@ impl<'a> BarRenderer<'a> {
             };
             for (button_index, button) in buttons.into_iter().enumerate() {
                 let text_width = button.text.as_deref().map_or(0, |text| {
-                    self.measure_text(
-                        text,
-                        width,
-                        height,
-                        font_size,
-                        text_color,
-                        button.bold.unwrap_or(self.config.bold),
-                    )
+                    self.measure_text(text, metrics, button.bold.unwrap_or(self.config.bold))
                 });
                 let button_padding = button.padding.unwrap_or(self.config.button_padding) as i32;
                 items.push((index, button_index, button, text_width, button_padding));
@@ -161,8 +144,8 @@ impl<'a> BarRenderer<'a> {
                 .sum::<i32>();
         let mut cursor = match alignment {
             Alignment::Left => self.config.padding as i32,
-            Alignment::Center => (width as i32 - total_width) / 2,
-            Alignment::Right => width.saturating_sub(self.config.padding) as i32,
+            Alignment::Center => (metrics.width as i32 - total_width) / 2,
+            Alignment::Right => metrics.width.saturating_sub(self.config.padding) as i32,
         };
 
         let items = if matches!(alignment, Alignment::Right) {
@@ -182,14 +165,14 @@ impl<'a> BarRenderer<'a> {
             let button_color = button
                 .color
                 .map(|[r, g, b, a]| TextColor::rgba(r, g, b, a))
-                .unwrap_or(text_color);
+                .unwrap_or(metrics.text_color);
             match alignment {
                 Alignment::Right => {
                     self.draw_button_background(
                         pixmap,
                         cursor - button_width,
                         cursor,
-                        height,
+                        metrics.height,
                         button_vertical_padding,
                         button.background,
                     );
@@ -205,8 +188,7 @@ impl<'a> BarRenderer<'a> {
                             pixmap,
                             text,
                             cursor - button_padding,
-                            height,
-                            font_size,
+                            metrics,
                             button_color,
                             bold,
                         );
@@ -219,7 +201,7 @@ impl<'a> BarRenderer<'a> {
                         pixmap,
                         cursor,
                         cursor + button_width,
-                        height,
+                        metrics.height,
                         button_vertical_padding,
                         button.background,
                     );
@@ -235,8 +217,7 @@ impl<'a> BarRenderer<'a> {
                             pixmap,
                             text,
                             cursor + button_padding + text_width,
-                            height,
-                            font_size,
+                            metrics,
                             button_color,
                             bold,
                         );
@@ -285,24 +266,19 @@ impl<'a> BarRenderer<'a> {
         pixmap.fill_rect(rect, &paint, Transform::identity(), None);
     }
 
-    fn measure_text(
-        &mut self,
-        text: &str,
-        width: u32,
-        height: u32,
-        font_size: f32,
-        text_color: TextColor,
-        bold: bool,
-    ) -> i32 {
-        let line_height = font_size * 1.2857;
-        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
+    fn measure_text(&mut self, text: &str, metrics: &RenderMetrics, bold: bool) -> i32 {
+        let line_height = metrics.font_size * 1.2857;
+        let mut buffer = Buffer::new(
+            &mut self.font_system,
+            Metrics::new(metrics.font_size, line_height),
+        );
         buffer.set_size(
             &mut self.font_system,
-            Some(width as f32),
-            Some(height as f32),
+            Some(metrics.width as f32),
+            Some(metrics.height as f32),
         );
         buffer.set_wrap(&mut self.font_system, Wrap::None);
-        let mut attrs = Attrs::new().color(text_color);
+        let mut attrs = Attrs::new().color(metrics.text_color);
         if !self.config.font_family.is_empty() {
             attrs = attrs.family(Family::Name(&self.config.font_family));
         }
@@ -323,17 +299,19 @@ impl<'a> BarRenderer<'a> {
         pixmap: &mut Pixmap,
         text: &str,
         right: i32,
-        height: u32,
-        font_size: f32,
+        metrics: &RenderMetrics,
         text_color: TextColor,
         bold: bool,
     ) -> i32 {
-        let line_height = font_size * 1.2857;
-        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(font_size, line_height));
+        let line_height = metrics.font_size * 1.2857;
+        let mut buffer = Buffer::new(
+            &mut self.font_system,
+            Metrics::new(metrics.font_size, line_height),
+        );
         buffer.set_size(
             &mut self.font_system,
             Some(pixmap.width() as f32),
-            Some(height as f32),
+            Some(metrics.height as f32),
         );
         buffer.set_wrap(&mut self.font_system, Wrap::None);
         let mut attrs = Attrs::new().color(text_color);
@@ -352,7 +330,7 @@ impl<'a> BarRenderer<'a> {
             .ceil() as i32;
         let x = right - text_width;
 
-        let text_y = ((height as f32 - line_height) / 2.0).max(0.0) as i32;
+        let text_y = ((metrics.height as f32 - line_height) / 2.0).max(0.0) as i32;
         buffer.draw(
             &mut self.font_system,
             &mut self.swash_cache,

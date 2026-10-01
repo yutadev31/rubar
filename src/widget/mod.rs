@@ -54,13 +54,16 @@ pub struct WidgetGroups {
 
 impl WidgetGroups {
     pub fn take_redraw_request(&self) -> bool {
-        self.left
+        let mut requested = false;
+        for widget in self
+            .left
             .iter()
             .chain(self.center.iter())
             .chain(self.right.iter())
-            .fold(false, |requested, widget| {
-                widget.take_redraw_request() || requested
-            })
+        {
+            requested |= widget.take_redraw_request();
+        }
+        requested
     }
 
     pub fn set_monitor_name(&mut self, monitor_name: Option<&str>) {

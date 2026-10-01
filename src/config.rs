@@ -2,7 +2,7 @@ use std::{error::Error, fs, path::PathBuf};
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
@@ -13,13 +13,13 @@ pub struct Config {
     pub style: StyleConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ClockConfig {
     pub show_seconds: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ModulesConfig {
     pub left: Vec<String>,
@@ -79,19 +79,6 @@ pub struct ColorsConfig {
     pub text: String,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            clock: ClockConfig::default(),
-            battery: BatteryConfig::default(),
-            modules: ModulesConfig::default(),
-            volume: VolumeConfig::default(),
-            workspace: WorkspaceConfig::default(),
-            style: StyleConfig::default(),
-        }
-    }
-}
-
 impl Default for StyleConfig {
     fn default() -> Self {
         Self {
@@ -114,24 +101,6 @@ impl Default for ColorsConfig {
         Self {
             bg: "#24283b".to_string(),
             text: "#c0caf5".to_string(),
-        }
-    }
-}
-
-impl Default for ClockConfig {
-    fn default() -> Self {
-        Self {
-            show_seconds: false,
-        }
-    }
-}
-
-impl Default for ModulesConfig {
-    fn default() -> Self {
-        Self {
-            left: Vec::new(),
-            center: Vec::new(),
-            right: Vec::new(),
         }
     }
 }

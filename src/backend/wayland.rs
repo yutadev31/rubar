@@ -364,22 +364,21 @@ impl Dispatch<wl_callback::WlCallback, ()> for State {
         _conn: &wayland_client::Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        if matches!(event, wl_callback::Event::Done { .. }) {
-            if let Some(bar) = state
+        if matches!(event, wl_callback::Event::Done { .. })
+            && let Some(bar) = state
                 .bars
                 .iter_mut()
                 .find(|bar| bar.frame_callback.as_ref() == Some(proxy))
-            {
-                bar.frame_callback = None;
-                if bar.last_draw.elapsed() < REDRAW_INTERVAL && !bar.needs_redraw {
-                    // Keep the frame callback as a low-frequency timer without
-                    // allocating another shm buffer for every compositor frame.
-                    bar.frame_callback = Some(bar.surface.frame(_qh, ()));
-                    bar.surface.damage_buffer(0, 0, 1, 1);
-                    bar.surface.commit();
-                } else {
-                    bar.needs_redraw = true;
-                }
+        {
+            bar.frame_callback = None;
+            if bar.last_draw.elapsed() < REDRAW_INTERVAL && !bar.needs_redraw {
+                // Keep the frame callback as a low-frequency timer without
+                // allocating another shm buffer for every compositor frame.
+                bar.frame_callback = Some(bar.surface.frame(_qh, ()));
+                bar.surface.damage_buffer(0, 0, 1, 1);
+                bar.surface.commit();
+            } else {
+                bar.needs_redraw = true;
             }
         }
     }
@@ -420,9 +419,11 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
                     });
                 }
             }
-            wl_pointer::Event::Axis { axis, value, .. }
-                if axis == wayland_client::WEnum::Value(wl_pointer::Axis::VerticalScroll) =>
-            {
+            wl_pointer::Event::Axis {
+                axis: wayland_client::WEnum::Value(wl_pointer::Axis::VerticalScroll),
+                value,
+                ..
+            } => {
                 state.pending_pointer_events.push(PointerEvent::Scroll {
                     direction: if value < 0.0 {
                         ScrollDirection::Up
@@ -462,11 +463,11 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
         _conn: &wayland_client::Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Name { name } = event {
-            if let Some(bar) = state.bars.iter_mut().find(|bar| &bar.output == proxy) {
-                bar.monitor_name = Some(name);
-                bar.needs_redraw = true;
-            }
+        if let wl_output::Event::Name { name } = event
+            && let Some(bar) = state.bars.iter_mut().find(|bar| &bar.output == proxy)
+        {
+            bar.monitor_name = Some(name);
+            bar.needs_redraw = true;
         }
     }
 }

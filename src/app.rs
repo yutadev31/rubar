@@ -23,9 +23,9 @@ impl<'a> App<'a> {
             right: create_widgets(&right, config)?,
         };
         let backend: Box<dyn Backend> = if env::var_os("WAYLAND_DISPLAY").is_some() {
-            Box::new(backend::wayland::WaylandBackend::default())
+            Box::new(backend::wayland::WaylandBackend)
         } else {
-            Box::new(backend::x11::X11Backend::default())
+            Box::new(backend::x11::X11Backend)
         };
         Ok(Self {
             backend,

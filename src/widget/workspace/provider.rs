@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     net::Shutdown,
     os::unix::net::UnixStream,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
     thread,
     time::Duration,
@@ -161,7 +161,7 @@ struct IpcCommandResult {
 
 fn update_ipc_state(
     wm_name: &str,
-    socket: &PathBuf,
+    socket: &Path,
     state: &Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: &Arc<RwLock<HashMap<i64, String>>>,
 ) -> Result<(), String> {
@@ -255,7 +255,7 @@ fn ipc_event_loop(
     }
 }
 
-fn ipc_request(socket: &PathBuf, message_type: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
+fn ipc_request(socket: &Path, message_type: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
     ipc_write_message(&mut stream, message_type, payload)?;
@@ -347,7 +347,7 @@ impl WorkspaceProvider for HyprlandProvider {
     }
 }
 
-fn send_command(socket: &PathBuf, command: &str) -> Result<String, String> {
+fn send_command(socket: &Path, command: &str) -> Result<String, String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
     stream
@@ -431,7 +431,7 @@ fn is_workspace_event(event: &str) -> bool {
     )
 }
 
-fn update_state(socket_dir: &PathBuf, state: &Arc<RwLock<Option<WorkspaceState>>>) {
+fn update_state(socket_dir: &Path, state: &Arc<RwLock<Option<WorkspaceState>>>) {
     match read_state(socket_dir) {
         Ok(new_state) => {
             if let Ok(mut state) = state.write() {
@@ -442,7 +442,7 @@ fn update_state(socket_dir: &PathBuf, state: &Arc<RwLock<Option<WorkspaceState>>
     }
 }
 
-fn read_state(socket_dir: &PathBuf) -> Result<WorkspaceState, String> {
+fn read_state(socket_dir: &Path) -> Result<WorkspaceState, String> {
     let mut workspaces = request_json::<Vec<HyprWorkspace>>(socket_dir, "j/workspaces")?;
     workspaces.sort_by_key(|workspace| workspace.id);
     let active = request_json::<ActiveWorkspace>(socket_dir, "j/activeworkspace")?;
@@ -459,7 +459,7 @@ fn read_state(socket_dir: &PathBuf) -> Result<WorkspaceState, String> {
     })
 }
 
-fn request_json<T>(socket_dir: &PathBuf, request: &str) -> Result<T, String>
+fn request_json<T>(socket_dir: &Path, request: &str) -> Result<T, String>
 where
     T: for<'de> Deserialize<'de>,
 {
