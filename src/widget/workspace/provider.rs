@@ -54,13 +54,217 @@ pub(crate) trait WorkspaceProvider: Send {
 }
 
 pub(crate) fn create(refresh_interval: Duration) -> Box<dyn WorkspaceProvider> {
+    if let Ok(provider) = SwayProvider::new(refresh_interval) {
+        return Box::new(provider);
+    }
     match HyprlandProvider::new(refresh_interval) {
         Ok(provider) => Box::new(provider),
         Err(error) => {
-            eprintln!("rubar: could not locate Hyprland IPC sockets: {error}");
+            eprintln!("rubar: could not locate Sway or Hyprland IPC sockets: {error}");
             Box::new(Unavailable)
         }
     }
+}
+
+struct SwayProvider {
+    socket: PathBuf,
+    state: Arc<RwLock<Option<WorkspaceState>>>,
+    workspace_names: Arc<RwLock<HashMap<i64, String>>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwayWorkspace {
+    name: String,
+    output: String,
+    #[serde(default)]
+    focused: bool,
+    #[serde(default)]
+    visible: bool,
+}
+
+impl SwayProvider {
+    fn new(reconnect_interval: Duration) -> Result<Self, String> {
+        let socket = std::env::var_os("SWAYSOCK")
+            .map(PathBuf::from)
+            .ok_or_else(|| "SWAYSOCK is not set".to_string())?;
+        if !socket.exists() {
+            return Err(format!("Sway socket does not exist: {}", socket.display()));
+        }
+
+        let state = Arc::new(RwLock::new(None));
+        let workspace_names = Arc::new(RwLock::new(HashMap::new()));
+        update_sway_state(&socket, &state, &workspace_names)?;
+
+        let event_socket = socket.clone();
+        let shared_state = Arc::clone(&state);
+        let shared_names = Arc::clone(&workspace_names);
+        thread::spawn(move || {
+            sway_event_loop(event_socket, shared_state, shared_names, reconnect_interval)
+        });
+
+        Ok(Self {
+            socket,
+            state,
+            workspace_names,
+        })
+    }
+}
+
+impl WorkspaceProvider for SwayProvider {
+    fn state(&self) -> Option<WorkspaceState> {
+        self.state.read().ok().and_then(|state| state.clone())
+    }
+
+    fn switch_to(&mut self, workspace_id: i64) -> Result<(), String> {
+        let name = self
+            .workspace_names
+            .read()
+            .ok()
+            .and_then(|names| names.get(&workspace_id).cloned())
+            .ok_or_else(|| format!("unknown Sway workspace {workspace_id}"))?;
+        let response = sway_request(&self.socket, 0, format!("workspace {name}").as_bytes())?;
+        let result: SwayCommandResult = serde_json::from_slice(&response)
+            .map_err(|error| format!("could not parse Sway command response: {error}"))?;
+        if !result.success {
+            return Err(format!("Sway rejected workspace {name}"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SwayCommandResult {
+    success: bool,
+}
+
+fn update_sway_state(
+    socket: &PathBuf,
+    state: &Arc<RwLock<Option<WorkspaceState>>>,
+    workspace_names: &Arc<RwLock<HashMap<i64, String>>>,
+) -> Result<(), String> {
+    let response = sway_request(socket, 1, b"{}")?;
+    let raw: Vec<SwayWorkspace> = serde_json::from_slice(&response)
+        .map_err(|error| format!("could not parse Sway workspaces: {error}"))?;
+
+    let mut output_ids = HashMap::new();
+    for workspace in &raw {
+        let next_id = output_ids.len() as i64;
+        output_ids
+            .entry(workspace.output.clone())
+            .or_insert(next_id);
+    }
+
+    let mut names = HashMap::new();
+    let workspaces = raw
+        .iter()
+        .enumerate()
+        .map(|(index, workspace)| {
+            let id = index as i64 + 1;
+            names.insert(id, workspace.name.clone());
+            HyprWorkspace {
+                id,
+                name: workspace.name.clone(),
+                monitor_id: output_ids[&workspace.output],
+                monitor: workspace.output.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let focused_index = raw.iter().position(|workspace| workspace.focused);
+    let active_id = focused_index
+        .map(|index| index as i64 + 1)
+        .unwrap_or_default();
+    let active_monitor_id = focused_index
+        .and_then(|index| raw.get(index))
+        .map(|workspace| output_ids[&workspace.output])
+        .unwrap_or_default();
+    let active_ids = raw
+        .iter()
+        .enumerate()
+        .filter(|(_, workspace)| workspace.visible)
+        .map(|(index, workspace)| (workspace.output.clone(), index as i64 + 1))
+        .collect();
+
+    if let Ok(mut target) = state.write() {
+        *target = Some(WorkspaceState {
+            workspaces,
+            active_id,
+            active_monitor_id,
+            active_ids,
+        });
+    }
+    if let Ok(mut target) = workspace_names.write() {
+        *target = names;
+    }
+    Ok(())
+}
+
+fn sway_event_loop(
+    socket: PathBuf,
+    state: Arc<RwLock<Option<WorkspaceState>>>,
+    workspace_names: Arc<RwLock<HashMap<i64, String>>>,
+    reconnect_interval: Duration,
+) {
+    loop {
+        match UnixStream::connect(&socket) {
+            Ok(mut stream) => {
+                if sway_write_message(&mut stream, 2, br#"["workspace","output"]"#).is_ok()
+                    && sway_read_message(&mut stream).is_ok()
+                {
+                    loop {
+                        match sway_read_message(&mut stream) {
+                            Ok((message_type, _)) if message_type & 0x8000_0000 != 0 => {
+                                let _ = update_sway_state(&socket, &state, &workspace_names);
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                eprintln!("rubar: Sway event socket read failed: {error}");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            Err(error) => eprintln!("rubar: could not connect to Sway event socket: {error}"),
+        }
+        thread::sleep(reconnect_interval);
+    }
+}
+
+fn sway_request(socket: &PathBuf, message_type: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
+    let mut stream = UnixStream::connect(socket)
+        .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
+    sway_write_message(&mut stream, message_type, payload)?;
+    sway_read_message(&mut stream).map(|(_, payload)| payload)
+}
+
+fn sway_write_message(
+    stream: &mut UnixStream,
+    message_type: u32,
+    payload: &[u8],
+) -> Result<(), String> {
+    stream
+        .write_all(b"i3-ipc")
+        .and_then(|()| stream.write_all(&(payload.len() as u32).to_le_bytes()))
+        .and_then(|()| stream.write_all(&message_type.to_le_bytes()))
+        .and_then(|()| stream.write_all(payload))
+        .map_err(|error| format!("could not write Sway IPC message: {error}"))
+}
+
+fn sway_read_message(stream: &mut UnixStream) -> Result<(u32, Vec<u8>), String> {
+    let mut header = [0; 14];
+    stream
+        .read_exact(&mut header)
+        .map_err(|error| format!("could not read Sway IPC header: {error}"))?;
+    if &header[..6] != b"i3-ipc" {
+        return Err("invalid Sway IPC header".to_string());
+    }
+    let length = u32::from_le_bytes(header[6..10].try_into().unwrap()) as usize;
+    let message_type = u32::from_le_bytes(header[10..14].try_into().unwrap());
+    let mut payload = vec![0; length];
+    stream
+        .read_exact(&mut payload)
+        .map_err(|error| format!("could not read Sway IPC payload: {error}"))?;
+    Ok((message_type, payload))
 }
 
 struct HyprlandProvider {
