@@ -11,6 +11,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct ClockConfig {
     pub show_seconds: bool,
 }
@@ -30,6 +31,7 @@ pub struct StyleConfig {
     pub height: u32,
     pub font_size: f32,
     pub padding: u32,
+    pub spacing: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +58,7 @@ impl Default for StyleConfig {
             height: 28,
             font_size: 14.0,
             padding: 8,
+            spacing: 8,
         }
     }
 }

@@ -50,7 +50,7 @@ impl<'a> BarRenderer<'a> {
                 font_size,
                 text_color,
             );
-            right -= widget_width;
+            right -= widget_width + self.config.spacing as i32;
         }
 
         // tiny-skia stores RGBA pixels. On little-endian machines Wayland's
