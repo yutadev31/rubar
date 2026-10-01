@@ -1,5 +1,6 @@
 pub mod clock;
+pub mod volume;
 
 pub trait Widget {
-    fn text(&self) -> String;
+    fn text(&mut self) -> String;
 }

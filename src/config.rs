@@ -6,12 +6,21 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
+    pub volume: VolumeConfig,
     pub style: StyleConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ClockConfig {
     pub show_seconds: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct VolumeConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +43,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             clock: ClockConfig::default(),
+            volume: VolumeConfig::default(),
             style: StyleConfig::default(),
         }
     }
@@ -63,6 +73,16 @@ impl Default for ClockConfig {
     fn default() -> Self {
         Self {
             show_seconds: false,
+        }
+    }
+}
+
+impl Default for VolumeConfig {
+    fn default() -> Self {
+        Self {
+            provider: "pulseaudio".to_string(),
+            format: "VOL {volume}%".to_string(),
+            refresh_seconds: 1,
         }
     }
 }

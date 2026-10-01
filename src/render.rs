@@ -41,7 +41,7 @@ impl<'a> BarRenderer<'a> {
         pixmap.fill(background);
 
         let mut right = width.saturating_sub(self.config.padding) as i32;
-        for widget in widgets.iter() {
+        for widget in widgets.iter_mut() {
             let widget_width = self.draw_text(
                 &mut pixmap,
                 &widget.text(),

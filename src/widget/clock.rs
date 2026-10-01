@@ -17,7 +17,7 @@ impl Clock {
 }
 
 impl Widget for Clock {
-    fn text(&self) -> String {
+    fn text(&mut self) -> String {
         let format = if self.show_seconds {
             "%H:%M:%S"
         } else {

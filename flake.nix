@@ -30,10 +30,13 @@
         nativeBuildInputs = with pkgs; [
           rust
           taplo
+          nixd
+          typos-lsp
           pkg-config
         ];
 
         buildInputs = with pkgs; [
+          libpulseaudio
           wayland
         ];
       in

@@ -4,7 +4,7 @@ use crate::{
     backend::{self, Backend},
     config::Config,
     render::BarRenderer,
-    widget::{Widget, clock::Clock},
+    widget::{Widget, clock::Clock, volume::Volume},
 };
 
 pub struct App<'a> {
@@ -18,7 +18,12 @@ impl<'a> App<'a> {
         Self {
             backend: Box::new(backend::wayland::WaylandBackend::default()),
             renderer: BarRenderer::new(&config.style),
-            widgets: vec![Box::new(Clock::new(&config.clock))],
+            widgets: {
+                vec![
+                    Box::new(Clock::new(&config.clock)),
+                    Box::new(Volume::new(&config.volume)),
+                ]
+            },
         }
     }
 
