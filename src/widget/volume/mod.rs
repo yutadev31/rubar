@@ -49,6 +49,7 @@ impl Widget for Volume {
         };
         let mut buttons = vec![WidgetButton {
             text: format_volume(&self.format, &self.muted_format, state.percent, state.muted),
+            padding: None,
             bold: None,
             color: None,
             background: None,
@@ -61,6 +62,7 @@ impl Widget for Volume {
                     microphone.percent,
                     microphone.muted,
                 ),
+                padding: None,
                 bold: None,
                 color: None,
                 background: None,

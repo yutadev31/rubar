@@ -119,6 +119,7 @@ impl<'a> BarRenderer<'a> {
             let buttons = match content {
                 WidgetContent::Text(text) => vec![WidgetButton {
                     text,
+                    padding: None,
                     bold: None,
                     color: None,
                     background: None,
@@ -134,17 +135,17 @@ impl<'a> BarRenderer<'a> {
                     text_color,
                     button.bold.unwrap_or(self.config.bold),
                 );
-                items.push((index, button_index, button, text_width));
+                let button_padding = button.padding.unwrap_or(self.config.button_padding) as i32;
+                items.push((index, button_index, button, text_width, button_padding));
             }
         }
 
         let spacing = self.config.spacing as i32;
-        let button_padding = self.config.button_padding as i32;
         let button_vertical_padding = self.config.button_vertical_padding;
         let button_spacing = self.config.button_spacing as i32;
         let total_width = items
             .iter()
-            .map(|(_, _, _, width)| *width + button_padding * 2)
+            .map(|(_, _, _, width, padding)| *width + padding * 2)
             .sum::<i32>()
             + items
                 .windows(2)
@@ -167,10 +168,13 @@ impl<'a> BarRenderer<'a> {
         } else {
             items
         };
-        for (position, (index, button_index, button, text_width)) in items.iter().enumerate() {
+        for (position, (index, button_index, button, text_width, button_padding)) in
+            items.iter().enumerate()
+        {
             let index = *index;
             let button_index = *button_index;
             let text_width = *text_width;
+            let button_padding = *button_padding;
             let button_width = text_width + button_padding * 2;
             let bold = button.bold.unwrap_or(self.config.bold);
             let button_color = button
@@ -374,7 +378,7 @@ impl<'a> BarRenderer<'a> {
 }
 
 fn next_spacing(
-    items: &[(usize, usize, WidgetButton, i32)],
+    items: &[(usize, usize, WidgetButton, i32, i32)],
     position: usize,
     spacing: i32,
     button_spacing: i32,

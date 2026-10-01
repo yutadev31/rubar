@@ -11,6 +11,7 @@ pub struct Workspace {
     format: String,
     active_color: [u8; 4],
     active_background_color: [u8; 4],
+    button_padding: u32,
     all_monitors: bool,
     monitor_name: Option<String>,
     workspace_ids: Vec<i64>,
@@ -46,6 +47,7 @@ impl Workspace {
                     [65, 72, 104, 255]
                 },
             ),
+            button_padding: config.button_padding,
             all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_ids: Vec::new(),
@@ -64,6 +66,7 @@ impl Widget for Workspace {
             self.workspace_ids.clear();
             return WidgetContent::Buttons(vec![WidgetButton {
                 text: self.format.replace("{workspaces}", "--"),
+                padding: Some(self.button_padding),
                 bold: Some(false),
                 color: None,
                 background: None,
@@ -81,6 +84,7 @@ impl Widget for Workspace {
                         .format
                         .replace("{workspaces}", &workspace.text)
                         .replace("{active}", &active_id),
+                    padding: Some(self.button_padding),
                     bold: Some(workspace.active),
                     // Only the active workspace on the active monitor uses the
                     // configured accent color. Other monitors keep the bar's

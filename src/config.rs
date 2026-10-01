@@ -50,6 +50,7 @@ pub struct BatteryConfig {
 #[serde(default)]
 pub struct WorkspaceConfig {
     pub format: String,
+    pub button_padding: u32,
     pub active_color: String,
     pub active_background_color: String,
     pub refresh_seconds: u64,
@@ -101,9 +102,9 @@ impl Default for StyleConfig {
             bold: false,
             padding: 8,
             spacing: 16,
-            button_padding: 12,
+            button_padding: 0,
             button_vertical_padding: 0,
-            button_spacing: 0,
+            button_spacing: 8,
         }
     }
 }
@@ -162,6 +163,7 @@ impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
             format: "{workspaces}".to_string(),
+            button_padding: 12,
             active_color: "#7aa2f7".to_string(),
             active_background_color: "#414868".to_string(),
             refresh_seconds: 1,

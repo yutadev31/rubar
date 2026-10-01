@@ -26,6 +26,7 @@ pub enum WidgetContent {
 #[derive(Debug, PartialEq, Eq)]
 pub struct WidgetButton {
     pub text: String,
+    pub padding: Option<u32>,
     pub bold: Option<bool>,
     pub color: Option<[u8; 4]>,
     pub background: Option<[u8; 4]>,
