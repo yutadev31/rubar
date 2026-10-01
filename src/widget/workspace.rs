@@ -16,6 +16,7 @@ use super::Widget;
 #[derive(Debug)]
 pub struct Workspace {
     format: String,
+    all_monitors: bool,
     state: Arc<RwLock<Option<WorkspaceState>>>,
 }
 
@@ -23,17 +24,22 @@ pub struct Workspace {
 struct WorkspaceState {
     workspaces: Vec<HyprWorkspace>,
     active_id: i64,
+    active_monitor_id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct HyprWorkspace {
     id: i64,
     name: String,
+    #[serde(rename = "monitorID")]
+    monitor_id: i64,
 }
 
 #[derive(Debug, Deserialize)]
 struct ActiveWorkspace {
     id: i64,
+    #[serde(rename = "monitorID")]
+    monitor_id: i64,
 }
 
 impl Workspace {
@@ -61,6 +67,7 @@ impl Workspace {
 
         Self {
             format: config.format.clone(),
+            all_monitors: config.all_monitors,
             state,
         }
     }
@@ -72,7 +79,7 @@ impl Widget for Workspace {
         let Some(state) = state else {
             return self.format.replace("{workspaces}", "--");
         };
-        let workspaces = render_workspaces(&state);
+        let workspaces = render_workspaces(&state, self.all_monitors);
         self.format
             .replace("{workspaces}", &workspaces)
             .replace("{active}", &state.active_id.to_string())
@@ -152,6 +159,7 @@ fn read_state(socket_dir: &PathBuf) -> Result<WorkspaceState, String> {
     Ok(WorkspaceState {
         workspaces,
         active_id: active.id,
+        active_monitor_id: active.monitor_id,
     })
 }
 
@@ -173,15 +181,24 @@ where
         .map_err(|error| format!("could not parse Hyprland response: {error}"))
 }
 
-fn render_workspaces(state: &WorkspaceState) -> String {
+fn render_workspaces(state: &WorkspaceState, all_monitors: bool) -> String {
+    let mut monitor_indices = std::collections::HashMap::new();
     state
         .workspaces
         .iter()
+        .filter(|workspace| all_monitors || workspace.monitor_id == state.active_monitor_id)
         .map(|workspace| {
-            if workspace.id == state.active_id {
-                format!("[{}]", workspace.name)
+            let index = monitor_indices.entry(workspace.monitor_id).or_insert(0);
+            *index += 1;
+            let name = if workspace.name.parse::<i64>().is_ok() {
+                index.to_string()
             } else {
                 workspace.name.clone()
+            };
+            if workspace.id == state.active_id {
+                format!("[{name}]")
+            } else {
+                name
             }
         })
         .collect::<Vec<_>>()
@@ -199,15 +216,24 @@ mod tests {
                 HyprWorkspace {
                     id: 1,
                     name: "1".to_string(),
+                    monitor_id: 0,
                 },
                 HyprWorkspace {
                     id: 2,
                     name: "dev".to_string(),
+                    monitor_id: 0,
+                },
+                HyprWorkspace {
+                    id: 11,
+                    name: "1".to_string(),
+                    monitor_id: 1,
                 },
             ],
             active_id: 2,
+            active_monitor_id: 0,
         };
-        assert_eq!(render_workspaces(&state), "1 [dev]");
+        assert_eq!(render_workspaces(&state, false), "1 [2]");
+        assert_eq!(render_workspaces(&state, true), "1 [2] 1");
     }
 
     #[test]

@@ -39,6 +39,7 @@ pub struct VolumeConfig {
 pub struct WorkspaceConfig {
     pub format: String,
     pub refresh_seconds: u64,
+    pub all_monitors: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +129,7 @@ impl Default for WorkspaceConfig {
         Self {
             format: "WS {workspaces}".to_string(),
             refresh_seconds: 1,
+            all_monitors: false,
         }
     }
 }
