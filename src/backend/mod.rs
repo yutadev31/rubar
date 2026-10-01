@@ -4,6 +4,7 @@ use crate::render::BarRenderer;
 use crate::widget::WidgetGroups;
 
 pub mod wayland;
+pub mod x11;
 
 /// Window-system integration boundary. An X11 backend can implement this
 /// trait without changing rendering or application startup code.

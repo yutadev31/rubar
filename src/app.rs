@@ -1,3 +1,4 @@
+use std::env;
 use std::error::Error;
 
 use crate::{
@@ -20,8 +21,13 @@ impl<'a> App<'a> {
             center: create_widgets(&config.modules.center, config)?,
             right: create_widgets(&config.modules.right, config)?,
         };
+        let backend: Box<dyn Backend> = if env::var_os("WAYLAND_DISPLAY").is_some() {
+            Box::new(backend::wayland::WaylandBackend::default())
+        } else {
+            Box::new(backend::x11::X11Backend::default())
+        };
         Ok(Self {
-            backend: Box::new(backend::wayland::WaylandBackend::default()),
+            backend,
             renderer: BarRenderer::new(&config.style),
             widgets,
         })

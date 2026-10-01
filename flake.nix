@@ -37,6 +37,7 @@
 
         buildInputs = with pkgs; [
           libpulseaudio
+          libxcb
           wayland
         ];
       in
