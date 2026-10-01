@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::VolumeConfig;
 
-use super::Widget;
+use super::{MouseButton, ScrollDirection, Widget};
 
 pub mod provider;
 
@@ -44,5 +44,55 @@ impl Widget for Volume {
         self.format
             .replace("{volume}", &state.percent.to_string())
             .replace("{muted}", if state.muted { "muted" } else { "unmuted" })
+    }
+
+    fn on_click(&mut self, button: MouseButton) {
+        if button != MouseButton::Left {
+            return;
+        }
+        let mut state = match self.state {
+            Some(state) => state,
+            None => match self.provider.read() {
+                Ok(state) => state,
+                Err(error) => {
+                    eprintln!("rubar: could not read volume before mute: {error}");
+                    return;
+                }
+            },
+        };
+        state.muted = !state.muted;
+        match self.provider.set_muted(state.muted) {
+            Ok(()) => {
+                self.state = Some(state);
+                self.last_refresh = Some(Instant::now());
+            }
+            Err(error) => eprintln!("rubar: could not set mute: {error}"),
+        }
+    }
+
+    fn on_scroll(&mut self, direction: ScrollDirection) {
+        let mut state = match self.state {
+            Some(state) => state,
+            None => match self.provider.read() {
+                Ok(state) => state,
+                Err(error) => {
+                    eprintln!("rubar: could not read volume before scroll: {error}");
+                    return;
+                }
+            },
+        };
+        let change = match direction {
+            ScrollDirection::Up => 1,
+            ScrollDirection::Down => -1,
+        };
+        let percent = (state.percent as i16 + change).clamp(0, 100) as u8;
+        match self.provider.set_percent(percent) {
+            Ok(()) => {
+                state.percent = percent;
+                self.state = Some(state);
+                self.last_refresh = Some(Instant::now());
+            }
+            Err(error) => eprintln!("rubar: could not set volume to {percent}%: {error}"),
+        }
     }
 }

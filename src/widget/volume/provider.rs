@@ -11,6 +11,14 @@ pub struct VolumeState {
 
 pub trait VolumeProvider {
     fn read(&mut self) -> Result<VolumeState, String>;
+
+    fn set_muted(&mut self, _muted: bool) -> Result<(), String> {
+        Err("volume provider does not support muting".to_string())
+    }
+
+    fn set_percent(&mut self, _percent: u8) -> Result<(), String> {
+        Err("volume provider does not support changing volume".to_string())
+    }
 }
 
 pub fn create(name: &str) -> Result<Box<dyn VolumeProvider>, String> {
@@ -126,6 +134,10 @@ impl PulseAudio {
         while operation.get_state() != pulse::operation::State::Done {
             self.mainloop.borrow_mut().wait();
         }
+        if operation.get_state() == pulse::operation::State::Cancelled {
+            self.mainloop.borrow_mut().unlock();
+            return Err("PulseAudio sink lookup operation was cancelled".to_string());
+        }
         self.mainloop.borrow_mut().unlock();
         sink.borrow_mut()
             .take()
@@ -141,6 +153,55 @@ impl VolumeProvider for PulseAudio {
             percent,
             muted: sink.mute,
         })
+    }
+
+    fn set_muted(&mut self, muted: bool) -> Result<(), String> {
+        let sink = self.read_default_sink()?;
+        self.mainloop.borrow_mut().lock();
+        let mainloop_ref = Rc::clone(&self.mainloop);
+        let operation = self.context.borrow().introspect().set_sink_mute_by_index(
+            sink.index,
+            muted,
+            Some(Box::new(move |_| {
+                unsafe { (*mainloop_ref.as_ptr()).signal(false) };
+            })),
+        );
+        while operation.get_state() != pulse::operation::State::Done {
+            self.mainloop.borrow_mut().wait();
+        }
+        if operation.get_state() == pulse::operation::State::Cancelled {
+            self.mainloop.borrow_mut().unlock();
+            return Err("PulseAudio volume operation was cancelled".to_string());
+        }
+        self.mainloop.borrow_mut().unlock();
+        Ok(())
+    }
+
+    fn set_percent(&mut self, percent: u8) -> Result<(), String> {
+        let sink = self.read_default_sink()?;
+        let value =
+            ((percent as f64 / 100.0) * pulse::volume::Volume::NORMAL.0 as f64).round() as u32;
+        let mut volumes = sink.volume;
+        volumes.set(volumes.len(), pulse::volume::Volume(value));
+
+        self.mainloop.borrow_mut().lock();
+        let mainloop_ref = Rc::clone(&self.mainloop);
+        let operation = self.context.borrow().introspect().set_sink_volume_by_index(
+            sink.index,
+            &volumes,
+            Some(Box::new(move |_| {
+                unsafe { (*mainloop_ref.as_ptr()).signal(false) };
+            })),
+        );
+        while operation.get_state() != pulse::operation::State::Done {
+            self.mainloop.borrow_mut().wait();
+        }
+        if operation.get_state() == pulse::operation::State::Cancelled {
+            self.mainloop.borrow_mut().unlock();
+            return Err("PulseAudio volume operation was cancelled".to_string());
+        }
+        self.mainloop.borrow_mut().unlock();
+        Ok(())
     }
 }
 

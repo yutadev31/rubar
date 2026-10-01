@@ -6,15 +6,15 @@ use wayland_client::{
     globals::GlobalListContents,
     globals::registry_queue_init,
     protocol::{
-        wl_buffer, wl_callback, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool,
-        wl_surface,
+        wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
+        wl_shm_pool, wl_surface,
     },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use super::Backend;
 use crate::render::BarRenderer;
-use crate::widget::WidgetGroups;
+use crate::widget::{MouseButton, ScrollDirection, WidgetGroups};
 
 const WIDTH_FALLBACK: u32 = 1280;
 
@@ -34,6 +34,7 @@ impl Backend for WaylandBackend {
         let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 1..=4, ())?;
         let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ())?;
         let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ())?;
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=9, ())?;
 
         let surface = compositor.create_surface(&qh, ());
         let layer_surface = layer_shell.get_layer_surface(
@@ -56,7 +57,8 @@ impl Backend for WaylandBackend {
 
         // The initial commit asks the compositor to send the configure event.
         surface.commit();
-        let mut state = State::new(shm, surface, layer_surface);
+        let pointer = seat.get_pointer(&qh, ());
+        let mut state = State::new(shm, surface, layer_surface, seat, pointer);
         event_queue.roundtrip(&mut state)?;
         if state.needs_redraw {
             state.draw(&qh, renderer, widgets)?;
@@ -64,7 +66,30 @@ impl Backend for WaylandBackend {
 
         while !state.closed {
             event_queue.blocking_dispatch(&mut state)?;
-            if state.needs_redraw {
+            let pointer_events = std::mem::take(&mut state.pending_pointer_events);
+            if !pointer_events.is_empty() {
+                state.needs_redraw = true;
+            }
+            for event in pointer_events {
+                match event {
+                    PointerEvent::Click { button } => {
+                        renderer.handle_click(state.pointer_x, button, widgets);
+                    }
+                    PointerEvent::Scroll { direction } => {
+                        if !renderer.handle_scroll(state.pointer_x, direction, widgets) {
+                            eprintln!(
+                                "rubar: scroll at x={} did not hit a widget",
+                                state.pointer_x
+                            );
+                        }
+                    }
+                }
+            }
+            // A surface must not be redrawn while its previous frame callback
+            // is outstanding.  In particular, pointer events can arrive
+            // faster than the compositor presents frames; keep the newest
+            // widget state and draw it when the callback is done.
+            if state.needs_redraw && state.frame_callback.is_none() {
                 state.draw(&qh, renderer, widgets)?;
             }
         }
@@ -78,6 +103,10 @@ struct State {
     layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     buffer: Option<ShmBuffer>,
     frame_callback: Option<wl_callback::WlCallback>,
+    _seat: wl_seat::WlSeat,
+    _pointer: wl_pointer::WlPointer,
+    pointer_x: f64,
+    pending_pointer_events: Vec<PointerEvent>,
     width: u32,
     needs_redraw: bool,
     closed: bool,
@@ -88,6 +117,8 @@ impl State {
         shm: wl_shm::WlShm,
         surface: wl_surface::WlSurface,
         layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        seat: wl_seat::WlSeat,
+        pointer: wl_pointer::WlPointer,
     ) -> Self {
         Self {
             shm,
@@ -95,6 +126,10 @@ impl State {
             layer_surface,
             buffer: None,
             frame_callback: None,
+            _seat: seat,
+            _pointer: pointer,
+            pointer_x: 0.0,
+            pending_pointer_events: Vec::new(),
             width: WIDTH_FALLBACK,
             needs_redraw: false,
             closed: false,
@@ -198,6 +233,59 @@ impl Dispatch<wl_callback::WlCallback, ()> for State {
     }
 }
 
+impl Dispatch<wl_pointer::WlPointer, ()> for State {
+    fn event(
+        state: &mut Self,
+        _proxy: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { surface_x, .. } => {
+                state.pointer_x = surface_x;
+            }
+            wl_pointer::Event::Motion { surface_x, .. } => {
+                state.pointer_x = surface_x;
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: button_state,
+                ..
+            } => {
+                if button_state.into_result().ok() == Some(wl_pointer::ButtonState::Pressed) {
+                    state.pending_pointer_events.push(PointerEvent::Click {
+                        button: match button {
+                            0x110 => MouseButton::Left,
+                            0x111 => MouseButton::Right,
+                            0x112 => MouseButton::Middle,
+                            other => MouseButton::Other(other),
+                        },
+                    });
+                }
+            }
+            wl_pointer::Event::Axis { axis, value, .. }
+                if axis == wayland_client::WEnum::Value(wl_pointer::Axis::VerticalScroll) =>
+            {
+                state.pending_pointer_events.push(PointerEvent::Scroll {
+                    direction: if value < 0.0 {
+                        ScrollDirection::Up
+                    } else {
+                        ScrollDirection::Down
+                    },
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+enum PointerEvent {
+    Click { button: MouseButton },
+    Scroll { direction: ScrollDirection },
+}
+
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
     fn event(
         _state: &mut Self,
@@ -211,6 +299,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
 }
 
 delegate_noop!(State: ignore wl_compositor::WlCompositor);
+delegate_noop!(State: ignore wl_seat::WlSeat);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_surface::WlSurface);

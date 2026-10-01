@@ -7,7 +7,7 @@ use cosmic_text::{
 use tiny_skia::{Color, Pixmap};
 
 use crate::config::StyleConfig;
-use crate::widget::{Widget, WidgetGroups};
+use crate::widget::{MouseButton, ScrollDirection, Widget, WidgetGroups};
 
 /// Renderer shared by window-system backends.
 ///
@@ -18,6 +18,7 @@ pub struct BarRenderer<'a> {
     font_system: FontSystem,
     swash_cache: SwashCache,
     config: &'a StyleConfig,
+    hitboxes: Vec<Hitbox>,
 }
 
 impl<'a> BarRenderer<'a> {
@@ -26,6 +27,7 @@ impl<'a> BarRenderer<'a> {
             font_system: FontSystem::new(),
             swash_cache: SwashCache::new(),
             config,
+            hitboxes: Vec::new(),
         }
     }
 
@@ -40,6 +42,7 @@ impl<'a> BarRenderer<'a> {
         let text_color = TextColor::rgba(text[0], text[1], text[2], text[3]);
         let font_size = self.config.font_size.max(1.0);
         pixmap.fill(background);
+        self.hitboxes.clear();
 
         self.draw_group(
             &mut pixmap,
@@ -78,6 +81,26 @@ impl<'a> BarRenderer<'a> {
             .collect()
     }
 
+    pub fn handle_click(&self, x: f64, button: MouseButton, widgets: &mut WidgetGroups) {
+        if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
+            hitbox.dispatch_click(button, widgets);
+        }
+    }
+
+    pub fn handle_scroll(
+        &self,
+        x: f64,
+        direction: ScrollDirection,
+        widgets: &mut WidgetGroups,
+    ) -> bool {
+        if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
+            hitbox.dispatch_scroll(direction, widgets);
+            true
+        } else {
+            false
+        }
+    }
+
     fn draw_group(
         &mut self,
         pixmap: &mut Pixmap,
@@ -89,14 +112,14 @@ impl<'a> BarRenderer<'a> {
         alignment: Alignment,
     ) {
         let mut items = Vec::with_capacity(widgets.len());
-        for widget in widgets.iter_mut() {
+        for (index, widget) in widgets.iter_mut().enumerate() {
             let text = widget.text();
             let text_width = self.measure_text(&text, width, height, font_size, text_color);
-            items.push((text, text_width));
+            items.push((index, text, text_width));
         }
 
         let spacing = self.config.spacing as i32;
-        let total_width = items.iter().map(|(_, width)| *width).sum::<i32>()
+        let total_width = items.iter().map(|(_, _, width)| *width).sum::<i32>()
             + spacing * items.len().saturating_sub(1) as i32;
         let mut cursor = match alignment {
             Alignment::Left => self.config.padding as i32,
@@ -109,13 +132,17 @@ impl<'a> BarRenderer<'a> {
         } else {
             items
         };
-        for (text, text_width) in items {
+        for (index, text, text_width) in items {
             match alignment {
                 Alignment::Right => {
+                    self.hitboxes
+                        .push(Hitbox::new(cursor - text_width, cursor, alignment, index));
                     self.draw_text(pixmap, &text, cursor, height, font_size, text_color);
                     cursor -= text_width + spacing;
                 }
                 Alignment::Left | Alignment::Center => {
+                    self.hitboxes
+                        .push(Hitbox::new(cursor, cursor + text_width, alignment, index));
                     self.draw_text(
                         pixmap,
                         &text,
@@ -231,6 +258,44 @@ enum Alignment {
     Left,
     Center,
     Right,
+}
+
+struct Hitbox {
+    left: i32,
+    right: i32,
+    alignment: Alignment,
+    index: usize,
+}
+
+impl Hitbox {
+    fn new(left: i32, right: i32, alignment: Alignment, index: usize) -> Self {
+        Self {
+            left,
+            right,
+            alignment,
+            index,
+        }
+    }
+
+    fn contains(&self, x: f64) -> bool {
+        x >= self.left as f64 && x < self.right as f64
+    }
+
+    fn dispatch_click(&self, button: MouseButton, widgets: &mut WidgetGroups) {
+        match self.alignment {
+            Alignment::Left => widgets.left[self.index].on_click(button),
+            Alignment::Center => widgets.center[self.index].on_click(button),
+            Alignment::Right => widgets.right[self.index].on_click(button),
+        }
+    }
+
+    fn dispatch_scroll(&self, direction: ScrollDirection, widgets: &mut WidgetGroups) {
+        match self.alignment {
+            Alignment::Left => widgets.left[self.index].on_scroll(direction),
+            Alignment::Center => widgets.center[self.index].on_scroll(direction),
+            Alignment::Right => widgets.right[self.index].on_scroll(direction),
+        }
+    }
 }
 
 fn parse_color(value: &str) -> Result<Color, Box<dyn Error>> {
