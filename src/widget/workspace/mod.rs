@@ -51,7 +51,11 @@ impl Workspace {
             all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_ids: Vec::new(),
-            provider: provider::create(refresh_interval),
+            provider: provider::create(
+                refresh_interval,
+                config.workspace_range,
+                &config.persistent_workspaces,
+            ),
         }
     }
 }

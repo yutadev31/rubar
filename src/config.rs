@@ -55,6 +55,10 @@ pub struct WorkspaceConfig {
     pub active_background_color: String,
     pub refresh_seconds: u64,
     pub all_monitors: bool,
+    /// Inclusive numeric range that should always be shown by i3/Sway.
+    pub workspace_range: Option<[i64; 2]>,
+    /// Additional workspace names to always show by i3/Sway.
+    pub persistent_workspaces: Vec<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +144,8 @@ impl Default for WorkspaceConfig {
             // expose the complete Hyprland workspace state by default. Users
             // who prefer the focused monitor only can still set this to false.
             all_monitors: true,
+            workspace_range: None,
+            persistent_workspaces: Vec::new(),
         }
     }
 }

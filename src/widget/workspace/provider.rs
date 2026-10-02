@@ -53,13 +53,24 @@ pub(crate) trait WorkspaceProvider: Send {
     fn switch_to(&mut self, workspace_id: i64) -> Result<(), String>;
 }
 
-pub(crate) fn create(refresh_interval: Duration) -> Box<dyn WorkspaceProvider> {
+pub(crate) fn create(
+    refresh_interval: Duration,
+    workspace_range: Option<[i64; 2]>,
+    persistent_workspaces: &[i64],
+) -> Box<dyn WorkspaceProvider> {
+    let persistent_workspaces = configured_workspace_names(workspace_range, persistent_workspaces);
     // i3 and Sway intentionally share the same IPC protocol.  Prefer the
     // compositor-specific environment variable when both happen to be set.
-    if let Ok(provider) = IpcProvider::new("Sway", "SWAYSOCK", refresh_interval) {
+    if let Ok(provider) = IpcProvider::new(
+        "Sway",
+        "SWAYSOCK",
+        refresh_interval,
+        persistent_workspaces.clone(),
+    ) {
         return Box::new(provider);
     }
-    if let Ok(provider) = IpcProvider::new("i3", "I3SOCK", refresh_interval) {
+    if let Ok(provider) = IpcProvider::new("i3", "I3SOCK", refresh_interval, persistent_workspaces)
+    {
         return Box::new(provider);
     }
     match HyprlandProvider::new(refresh_interval) {
@@ -69,6 +80,29 @@ pub(crate) fn create(refresh_interval: Duration) -> Box<dyn WorkspaceProvider> {
             Box::new(Unavailable)
         }
     }
+}
+
+fn configured_workspace_names(
+    workspace_range: Option<[i64; 2]>,
+    persistent_workspaces: &[i64],
+) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some([start, end]) = workspace_range {
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        names.extend((start..=end).map(|id| id.to_string()));
+    }
+    names.extend(persistent_workspaces.iter().map(ToString::to_string));
+    let mut unique = Vec::with_capacity(names.len());
+    for name in names {
+        if !unique.contains(&name) {
+            unique.push(name);
+        }
+    }
+    unique
 }
 
 struct IpcProvider {
@@ -93,6 +127,7 @@ impl IpcProvider {
         wm_name: &'static str,
         socket_variable: &str,
         reconnect_interval: Duration,
+        persistent_workspaces: Vec<String>,
     ) -> Result<Self, String> {
         let socket = std::env::var_os(socket_variable)
             .map(PathBuf::from)
@@ -106,11 +141,18 @@ impl IpcProvider {
 
         let state = Arc::new(RwLock::new(None));
         let workspace_names = Arc::new(RwLock::new(HashMap::new()));
-        update_ipc_state(wm_name, &socket, &state, &workspace_names)?;
+        update_ipc_state(
+            wm_name,
+            &socket,
+            &state,
+            &workspace_names,
+            &persistent_workspaces,
+        )?;
 
         let event_socket = socket.clone();
         let shared_state = Arc::clone(&state);
         let shared_names = Arc::clone(&workspace_names);
+        let event_persistent_workspaces = persistent_workspaces.clone();
         let event_wm_name = wm_name;
         thread::spawn(move || {
             ipc_event_loop(
@@ -118,6 +160,7 @@ impl IpcProvider {
                 event_socket,
                 shared_state,
                 shared_names,
+                event_persistent_workspaces,
                 reconnect_interval,
             )
         });
@@ -164,6 +207,7 @@ fn update_ipc_state(
     socket: &Path,
     state: &Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: &Arc<RwLock<HashMap<i64, String>>>,
+    persistent_workspaces: &[String],
 ) -> Result<(), String> {
     let response = ipc_request(socket, 1, b"{}")?;
     let raw: Vec<IpcWorkspace> = serde_json::from_slice(&response)
@@ -177,34 +221,76 @@ fn update_ipc_state(
             .or_insert(next_id);
     }
 
+    let fallback_output = raw
+        .iter()
+        .find(|workspace| workspace.focused)
+        .or_else(|| raw.first())
+        .map(|workspace| workspace.output.clone())
+        .unwrap_or_default();
+    let mut used = vec![false; raw.len()];
+    let mut specs = Vec::new();
+    for name in persistent_workspaces {
+        if let Some((index, workspace)) = raw
+            .iter()
+            .enumerate()
+            .find(|(index, workspace)| !used[*index] && workspace.name == *name)
+        {
+            used[index] = true;
+            specs.push((
+                workspace.name.clone(),
+                workspace.output.clone(),
+                workspace.focused,
+                workspace.visible,
+            ));
+        } else {
+            // A missing workspace is placed on the focused output so it is
+            // visible with the default all-monitors setting and can be
+            // created by clicking its button.
+            specs.push((name.clone(), fallback_output.clone(), false, false));
+        }
+    }
+    specs.extend(
+        raw.iter()
+            .enumerate()
+            .filter(|(index, _)| !used[*index])
+            .map(|(_, workspace)| {
+                (
+                    workspace.name.clone(),
+                    workspace.output.clone(),
+                    workspace.focused,
+                    workspace.visible,
+                )
+            }),
+    );
+
     let mut names = HashMap::new();
-    let workspaces = raw
+    let workspaces = specs
         .iter()
         .enumerate()
-        .map(|(index, workspace)| {
+        .map(|(index, (name, output, _, _))| {
             let id = index as i64 + 1;
-            names.insert(id, workspace.name.clone());
+            names.insert(id, name.clone());
             HyprWorkspace {
                 id,
-                name: workspace.name.clone(),
-                monitor_id: output_ids[&workspace.output],
-                monitor: workspace.output.clone(),
+                name: name.clone(),
+                monitor_id: *output_ids.get(output).unwrap_or(&0),
+                monitor: output.clone(),
             }
         })
         .collect::<Vec<_>>();
-    let focused_index = raw.iter().position(|workspace| workspace.focused);
-    let active_id = focused_index
+    let active_index = specs.iter().position(|(_, _, focused, _)| *focused);
+    let active_id = active_index
         .map(|index| index as i64 + 1)
         .unwrap_or_default();
-    let active_monitor_id = focused_index
-        .and_then(|index| raw.get(index))
-        .map(|workspace| output_ids[&workspace.output])
+    let active_monitor_id = active_index
+        .and_then(|index| workspaces.get(index))
+        .map(|workspace| workspace.monitor_id)
         .unwrap_or_default();
-    let active_ids = raw
+    let active_ids = specs
         .iter()
         .enumerate()
-        .filter(|(_, workspace)| workspace.visible)
-        .map(|(index, workspace)| (workspace.output.clone(), index as i64 + 1))
+        .filter(|(_, (_, _, _, visible))| *visible)
+        .map(|(index, (_, output, _, _))| (output.clone(), index as i64 + 1))
         .collect();
 
     if let Ok(mut target) = state.write() {
@@ -226,6 +312,7 @@ fn ipc_event_loop(
     socket: PathBuf,
     state: Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: Arc<RwLock<HashMap<i64, String>>>,
+    persistent_workspaces: Vec<String>,
     reconnect_interval: Duration,
 ) {
     loop {
@@ -237,8 +324,13 @@ fn ipc_event_loop(
                     loop {
                         match ipc_read_message(&mut stream) {
                             Ok((message_type, _)) if message_type & 0x8000_0000 != 0 => {
-                                let _ =
-                                    update_ipc_state(wm_name, &socket, &state, &workspace_names);
+                                let _ = update_ipc_state(
+                                    wm_name,
+                                    &socket,
+                                    &state,
+                                    &workspace_names,
+                                    &persistent_workspaces,
+                                );
                             }
                             Ok(_) => {}
                             Err(error) => {
@@ -479,7 +571,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::is_workspace_event;
+    use super::{configured_workspace_names, is_workspace_event};
+
+    #[test]
+    fn configured_workspace_names_expands_and_deduplicates() {
+        assert_eq!(
+            configured_workspace_names(Some([5, 1]), &[3, 6, 3]),
+            vec!["1", "2", "3", "4", "5", "6"]
+        );
+    }
 
     #[test]
     fn only_workspace_events_trigger_refresh() {
