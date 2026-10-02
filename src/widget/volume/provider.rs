@@ -1,9 +1,15 @@
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::{
+    cell::RefCell,
+    ops::Deref,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use libpulse_binding as pulse;
 use pulse::{
     callbacks::ListResult,
     context::introspect::{SinkInfo, SourceInfo},
+    context::subscribe::{self, InterestMaskSet},
     mainloop::threaded::Mainloop,
 };
 
@@ -59,6 +65,7 @@ impl VolumeProvider for Unavailable {
 pub struct PulseAudio {
     context: Rc<RefCell<pulse::context::Context>>,
     mainloop: Rc<RefCell<Mainloop>>,
+    state: Arc<Mutex<Option<VolumeState>>>,
 }
 
 impl PulseAudio {
@@ -111,7 +118,14 @@ impl PulseAudio {
         context.borrow_mut().set_state_callback(None);
         mainloop.borrow_mut().unlock();
 
-        Ok(Self { mainloop, context })
+        let state = Arc::new(Mutex::new(None));
+        install_subscription(&context, &mainloop, &state)?;
+
+        Ok(Self {
+            mainloop,
+            context,
+            state,
+        })
     }
 
     fn read_default_sink(&mut self) -> Result<SinkInfo<'static>, String> {
@@ -210,6 +224,10 @@ impl PulseAudio {
 
 impl VolumeProvider for PulseAudio {
     fn read(&mut self) -> Result<VolumeState, String> {
+        if let Some(state) = *self.state.lock().unwrap() {
+            return Ok(state);
+        }
+
         let sink = self.read_default_sink()?;
         let percent = volume_percent(sink.volume.avg().0);
         let input = self
@@ -219,13 +237,15 @@ impl VolumeProvider for PulseAudio {
                 percent: volume_percent(source.volume.avg().0),
                 muted: source.mute,
             });
-        Ok(VolumeState {
+        let state = VolumeState {
             output: Some(VolumeChannelState {
                 percent,
                 muted: sink.mute,
             }),
             input,
-        })
+        };
+        *self.state.lock().unwrap() = Some(state);
+        Ok(state)
     }
 
     fn set_muted(&mut self, muted: bool) -> Result<(), String> {
@@ -338,6 +358,120 @@ impl VolumeProvider for PulseAudio {
             Ok(())
         }
     }
+}
+
+fn install_subscription(
+    context: &Rc<RefCell<pulse::context::Context>>,
+    mainloop: &Rc<RefCell<Mainloop>>,
+    state: &Arc<Mutex<Option<VolumeState>>>,
+) -> Result<(), String> {
+    let context_weak = Rc::downgrade(context);
+    let state = Arc::clone(state);
+
+    mainloop.borrow_mut().lock();
+    context.borrow_mut().set_subscribe_callback(Some(Box::new(
+        move |facility, operation, _index| {
+            if !matches!(
+                facility,
+                Some(
+                    subscribe::Facility::Sink
+                        | subscribe::Facility::Source
+                        | subscribe::Facility::Server
+                )
+            ) || !matches!(
+                operation,
+                Some(
+                    subscribe::Operation::New
+                        | subscribe::Operation::Changed
+                        | subscribe::Operation::Removed
+                )
+            ) {
+                return;
+            }
+
+            let Some(context) = context_weak.upgrade() else {
+                return;
+            };
+            refresh_async(&context, &state);
+        },
+    )));
+
+    let completed = Rc::new(RefCell::new(None));
+    let completed_ref = Rc::clone(&completed);
+    let mainloop_ref = Rc::downgrade(mainloop);
+    let operation = context.borrow_mut().subscribe(
+        InterestMaskSet::SINK | InterestMaskSet::SOURCE | InterestMaskSet::SERVER,
+        move |success| {
+            *completed_ref.borrow_mut() = Some(success);
+            if let Some(mainloop) = mainloop_ref.upgrade() {
+                unsafe { (*mainloop.as_ptr()).signal(false) };
+            }
+        },
+    );
+    while operation.get_state() != pulse::operation::State::Done {
+        mainloop.borrow_mut().wait();
+    }
+    let success = completed.borrow_mut().take().unwrap_or(false);
+    let cancelled = operation.get_state() == pulse::operation::State::Cancelled;
+    mainloop.borrow_mut().unlock();
+
+    if cancelled || !success {
+        Err("could not subscribe to PulseAudio volume events".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn refresh_async(
+    context: &Rc<RefCell<pulse::context::Context>>,
+    state: &Arc<Mutex<Option<VolumeState>>>,
+) {
+    let state_for_server = Arc::clone(state);
+    let context_for_server = Rc::clone(context);
+    context.borrow().introspect().get_server_info(move |info| {
+        let sink_name = info.default_sink_name.as_ref().map(ToString::to_string);
+        let source_name = info.default_source_name.as_ref().map(ToString::to_string);
+
+        if let Some(name) = sink_name {
+            let state = Arc::clone(&state_for_server);
+            context_for_server
+                .borrow()
+                .introspect()
+                .get_sink_info_by_name(&name, move |result| {
+                    if let ListResult::Item(info) = result {
+                        let mut current = state.lock().unwrap();
+                        let input = current.and_then(|state| state.input);
+                        *current = Some(VolumeState {
+                            output: Some(VolumeChannelState {
+                                percent: volume_percent(info.volume.avg().0),
+                                muted: info.mute,
+                            }),
+                            input,
+                        });
+                    }
+                });
+        }
+
+        if let Some(name) = source_name {
+            let state = Arc::clone(&state_for_server);
+            context_for_server
+                .borrow()
+                .introspect()
+                .get_source_info_by_name(&name, move |result| {
+                    if let ListResult::Item(info) = result {
+                        let mut current = state.lock().unwrap();
+                        let output = current.and_then(|state| state.output);
+                        *current = Some(VolumeState {
+                            output,
+                            input: Some(VolumeChannelState {
+                                percent: volume_percent(info.volume.avg().0),
+                                muted: info.mute,
+                            }),
+                        });
+                    }
+                });
+        }
+    });
 }
 
 fn volume_percent(value: u32) -> u8 {

@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use crate::config::VolumeConfig;
 
 use super::{MouseButton, ScrollDirection, Widget, WidgetButton, WidgetContent};
@@ -12,8 +10,6 @@ pub struct Volume {
     out_muted_format: String,
     in_format: String,
     in_muted_format: String,
-    refresh_interval: Duration,
-    last_refresh: Option<Instant>,
     state: Option<provider::VolumeState>,
 }
 
@@ -28,8 +24,6 @@ impl Volume {
             out_muted_format: config.out_muted_format.clone(),
             in_format: config.in_format.clone(),
             in_muted_format: config.in_muted_format.clone(),
-            refresh_interval: Duration::from_secs(config.refresh_seconds.max(1)),
-            last_refresh: None,
             state: None,
         }
     }
@@ -37,12 +31,8 @@ impl Volume {
 
 impl Widget for Volume {
     fn content(&mut self) -> WidgetContent {
-        let should_refresh = self
-            .last_refresh
-            .is_none_or(|last| last.elapsed() >= self.refresh_interval);
-        if should_refresh {
-            self.state = self.provider.read().ok();
-            self.last_refresh = Some(Instant::now());
+        if let Ok(state) = self.provider.read() {
+            self.state = Some(state);
         }
 
         let Some(state) = self.state else {
@@ -122,7 +112,6 @@ impl Widget for Volume {
         match result {
             Ok(()) => {
                 self.state = Some(state);
-                self.last_refresh = Some(Instant::now());
             }
             Err(error) => eprintln!("rubar: could not set mute: {error}"),
         }
@@ -175,7 +164,6 @@ impl Widget for Volume {
                     }
                 }
                 self.state = Some(state);
-                self.last_refresh = Some(Instant::now());
             }
             Err(error) => eprintln!("rubar: could not set volume to {percent}%: {error}"),
         }

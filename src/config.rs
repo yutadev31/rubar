@@ -35,7 +35,6 @@ pub struct VolumeConfig {
     pub out_muted_format: String,
     pub in_format: String,
     pub in_muted_format: String,
-    pub refresh_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,7 +116,6 @@ impl Default for VolumeConfig {
             out_muted_format: "OUT [M]".to_string(),
             in_format: "IN {volume}%".to_string(),
             in_muted_format: "IN [M]".to_string(),
-            refresh_seconds: 1,
         }
     }
 }
