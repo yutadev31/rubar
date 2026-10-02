@@ -579,16 +579,12 @@ dependencies = [
  "cosmic-text",
  "dirs",
  "libpulse-binding",
- "memmap2",
  "serde",
  "serde_json",
+ "shell-surface",
  "tempfile",
  "tiny-skia",
  "toml",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
- "x11rb",
 ]
 
 [[package]]
@@ -689,6 +685,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "shell-surface"
+version = "0.1.0"
+source = "git+https://github.com/yutadev31/shell-surface.git?rev=89b6a5f53565d949c49ae26f447eadf96dfa96bd#89b6a5f53565d949c49ae26f447eadf96dfa96bd"
+dependencies = [
+ "memmap2",
+ "tempfile",
+ "wayland-client",
+ "wayland-protocols-wlr",
+ "x11rb",
 ]
 
 [[package]]

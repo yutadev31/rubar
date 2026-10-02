@@ -10,11 +10,9 @@ dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-memmap2 = "0.9"
 libpulse-binding = "2.30"
-tempfile = "3"
 tiny-skia = "0.11"
-wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client"] }
-wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
+shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "89b6a5f53565d949c49ae26f447eadf96dfa96bd" }
+
+[dev-dependencies]
+tempfile = "3"

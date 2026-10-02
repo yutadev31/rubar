@@ -40,10 +40,6 @@ impl<'a> BarRenderer<'a> {
         }
     }
 
-    pub fn height(&self) -> u32 {
-        self.config.height.max(1)
-    }
-
     pub fn render(&mut self, width: u32, height: u32, widgets: &mut WidgetGroups) -> Vec<u8> {
         let mut pixmap = Pixmap::new(width, height).expect("valid bar dimensions");
         let background = parse_color(&self.config.colors.bg).expect("validated background color");

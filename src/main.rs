@@ -1,5 +1,4 @@
 mod app;
-mod backend;
 mod config;
 mod render;
 mod widget;

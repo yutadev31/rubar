@@ -35,10 +35,6 @@ pub struct WidgetButton {
 pub trait Widget {
     fn content(&mut self) -> WidgetContent;
 
-    fn take_redraw_request(&self) -> bool {
-        false
-    }
-
     fn set_monitor_name(&mut self, _monitor_name: Option<&str>) {}
 
     fn on_click(&mut self, _button: MouseButton, _item: usize) {}
@@ -53,19 +49,6 @@ pub struct WidgetGroups {
 }
 
 impl WidgetGroups {
-    pub fn take_redraw_request(&self) -> bool {
-        let mut requested = false;
-        for widget in self
-            .left
-            .iter()
-            .chain(self.center.iter())
-            .chain(self.right.iter())
-        {
-            requested |= widget.take_redraw_request();
-        }
-        requested
-    }
-
     pub fn set_monitor_name(&mut self, monitor_name: Option<&str>) {
         for widget in self
             .left
