@@ -57,10 +57,7 @@ impl Workspace {
             all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_targets: Vec::new(),
-            provider: provider::create(
-                config.workspace_range,
-                &config.persistent_workspaces,
-            ),
+            provider: provider::create(&config.persistent_workspaces),
         }
     }
 }

@@ -58,12 +58,9 @@ pub(crate) trait WorkspaceProvider: Send {
     ) -> Result<(), String>;
 }
 
-pub(crate) fn create(
-    workspace_range: Option<[i64; 2]>,
-    persistent_workspaces: &[i64],
-) -> Box<dyn WorkspaceProvider> {
+pub(crate) fn create(persistent_workspaces: &[i64]) -> Box<dyn WorkspaceProvider> {
     const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
-    let persistent_workspaces = configured_workspace_names(workspace_range, persistent_workspaces);
+    let persistent_workspaces = configured_workspace_names(persistent_workspaces);
     // i3 and Sway intentionally share the same IPC protocol.  Prefer the
     // compositor-specific environment variable when both happen to be set.
     if let Ok(provider) = IpcProvider::new(
@@ -88,20 +85,8 @@ pub(crate) fn create(
     }
 }
 
-fn configured_workspace_names(
-    workspace_range: Option<[i64; 2]>,
-    persistent_workspaces: &[i64],
-) -> Vec<String> {
-    let mut names = Vec::new();
-    if let Some([start, end]) = workspace_range {
-        let (start, end) = if start <= end {
-            (start, end)
-        } else {
-            (end, start)
-        };
-        names.extend((start..=end).map(|id| id.to_string()));
-    }
-    names.extend(persistent_workspaces.iter().map(ToString::to_string));
+fn configured_workspace_names(persistent_workspaces: &[i64]) -> Vec<String> {
+    let names = persistent_workspaces.iter().map(ToString::to_string);
     let mut unique = Vec::with_capacity(names.len());
     for name in names {
         if !unique.contains(&name) {
@@ -636,10 +621,10 @@ mod tests {
     use super::{configured_workspace_names, is_workspace_event, parse_ipc_command_response};
 
     #[test]
-    fn configured_workspace_names_expands_and_deduplicates() {
+    fn configured_workspace_names_deduplicates() {
         assert_eq!(
-            configured_workspace_names(Some([5, 1]), &[3, 6, 3]),
-            vec!["1", "2", "3", "4", "5", "6"]
+            configured_workspace_names(&[1, 2, 3, 5, 3]),
+            vec!["1", "2", "3", "5"]
         );
     }
 
