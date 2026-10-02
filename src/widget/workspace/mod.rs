@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::config::WorkspaceConfig;
 
 use super::{Widget, WidgetButton, WidgetContent};
@@ -28,7 +26,6 @@ struct RenderedWorkspace {
 
 impl Workspace {
     pub fn new(config: &WorkspaceConfig) -> Self {
-        let refresh_interval = Duration::from_secs(config.refresh_seconds.max(1));
         Self {
             format: config.format.clone(),
             active_color: parse_color(&config.active_color).unwrap_or_else(|error| {
@@ -52,7 +49,6 @@ impl Workspace {
             monitor_name: None,
             workspace_ids: Vec::new(),
             provider: provider::create(
-                refresh_interval,
                 config.workspace_range,
                 &config.persistent_workspaces,
             ),

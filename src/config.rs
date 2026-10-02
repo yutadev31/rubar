@@ -52,7 +52,6 @@ pub struct WorkspaceConfig {
     pub button_padding: u32,
     pub active_color: String,
     pub active_background_color: String,
-    pub refresh_seconds: u64,
     pub all_monitors: bool,
     /// Inclusive numeric range that should always be shown by i3/Sway.
     pub workspace_range: Option<[i64; 2]>,
@@ -137,7 +136,6 @@ impl Default for WorkspaceConfig {
             button_padding: 12,
             active_color: "#7aa2f7".to_string(),
             active_background_color: "#414868".to_string(),
-            refresh_seconds: 1,
             // A bar now exists on every output, so the workspace module should
             // expose the complete Hyprland workspace state by default. Users
             // who prefer the focused monitor only can still set this to false.

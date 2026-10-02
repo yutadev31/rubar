@@ -54,26 +54,27 @@ pub(crate) trait WorkspaceProvider: Send {
 }
 
 pub(crate) fn create(
-    refresh_interval: Duration,
     workspace_range: Option<[i64; 2]>,
     persistent_workspaces: &[i64],
 ) -> Box<dyn WorkspaceProvider> {
+    const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
     let persistent_workspaces = configured_workspace_names(workspace_range, persistent_workspaces);
     // i3 and Sway intentionally share the same IPC protocol.  Prefer the
     // compositor-specific environment variable when both happen to be set.
     if let Ok(provider) = IpcProvider::new(
         "Sway",
         "SWAYSOCK",
-        refresh_interval,
+        RECONNECT_INTERVAL,
         persistent_workspaces.clone(),
     ) {
         return Box::new(provider);
     }
-    if let Ok(provider) = IpcProvider::new("i3", "I3SOCK", refresh_interval, persistent_workspaces)
+    if let Ok(provider) =
+        IpcProvider::new("i3", "I3SOCK", RECONNECT_INTERVAL, persistent_workspaces)
     {
         return Box::new(provider);
     }
-    match HyprlandProvider::new(refresh_interval) {
+    match HyprlandProvider::new(RECONNECT_INTERVAL) {
         Ok(provider) => Box::new(provider),
         Err(error) => {
             eprintln!("rubar: could not locate i3, Sway, or Hyprland IPC sockets: {error}");
