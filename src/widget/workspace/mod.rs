@@ -12,13 +12,22 @@ pub struct Workspace {
     button_padding: u32,
     all_monitors: bool,
     monitor_name: Option<String>,
-    workspace_ids: Vec<i64>,
+    workspace_targets: Vec<WorkspaceTarget>,
     provider: Box<dyn WorkspaceProvider>,
+}
+
+#[derive(Debug, Clone)]
+struct WorkspaceTarget {
+    id: i64,
+    monitor: String,
+    local_index: Option<i64>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct RenderedWorkspace {
     id: i64,
+    monitor: String,
+    local_index: Option<i64>,
     text: String,
     active: bool,
     active_on_monitor: bool,
@@ -47,7 +56,7 @@ impl Workspace {
             button_padding: config.button_padding,
             all_monitors: config.all_monitors,
             monitor_name: None,
-            workspace_ids: Vec::new(),
+            workspace_targets: Vec::new(),
             provider: provider::create(
                 config.workspace_range,
                 &config.persistent_workspaces,
@@ -63,7 +72,7 @@ impl Widget for Workspace {
 
     fn content(&mut self) -> WidgetContent {
         let Some(state) = self.provider.state() else {
-            self.workspace_ids.clear();
+            self.workspace_targets.clear();
             return WidgetContent::Buttons(vec![WidgetButton {
                 text: Some(self.format.replace("{workspaces}", "--")),
                 padding: Some(self.button_padding),
@@ -75,7 +84,14 @@ impl Widget for Workspace {
 
         let active_id = state.active_id.to_string();
         let workspaces = render_workspaces(&state, self.monitor_name.as_deref(), self.all_monitors);
-        self.workspace_ids = workspaces.iter().map(|workspace| workspace.id).collect();
+        self.workspace_targets = workspaces
+            .iter()
+            .map(|workspace| WorkspaceTarget {
+                id: workspace.id,
+                monitor: workspace.monitor.clone(),
+                local_index: workspace.local_index,
+            })
+            .collect();
         WidgetContent::Buttons(
             workspaces
                 .into_iter()
@@ -105,11 +121,30 @@ impl Widget for Workspace {
         if button != super::MouseButton::Left {
             return;
         }
-        let Some(workspace_id) = self.workspace_ids.get(item).copied() else {
+        let target = self
+            .provider
+            .state()
+            .and_then(|state| {
+                render_workspaces(&state, self.monitor_name.as_deref(), false)
+                    .get(item)
+                    .map(|workspace| WorkspaceTarget {
+                        id: workspace.id,
+                        monitor: workspace.monitor.clone(),
+                        local_index: workspace.local_index,
+                    })
+            })
+            .or_else(|| self.workspace_targets.get(item).cloned());
+        let Some(target) = target else {
             return;
         };
-        if let Err(error) = self.provider.switch_to(workspace_id) {
-            eprintln!("rubar: could not switch to workspace {workspace_id}: {error}");
+        if let Err(error) =
+            self.provider
+                .switch_to(target.id, Some(&target.monitor), target.local_index)
+        {
+            eprintln!(
+                "rubar: could not switch to workspace {}: {error}",
+                target.id
+            );
         }
     }
 }
@@ -167,6 +202,8 @@ fn render_workspaces(
             };
             RenderedWorkspace {
                 id: workspace.id,
+                monitor: workspace.monitor.clone(),
+                local_index: workspace.name.parse::<i64>().ok().map(|_| *index),
                 text,
                 active: workspace.id == active_id,
                 active_on_monitor: workspace.id == globally_active_id,
@@ -213,12 +250,16 @@ mod tests {
             vec![
                 RenderedWorkspace {
                     id: 1,
+                    monitor: "DP-1".to_string(),
+                    local_index: Some(1),
                     text: "1".to_string(),
                     active: false,
                     active_on_monitor: false
                 },
                 RenderedWorkspace {
                     id: 2,
+                    monitor: "DP-1".to_string(),
+                    local_index: None,
                     text: "dev".to_string(),
                     active: true,
                     active_on_monitor: true
@@ -230,18 +271,24 @@ mod tests {
             vec![
                 RenderedWorkspace {
                     id: 1,
+                    monitor: "DP-1".to_string(),
+                    local_index: Some(1),
                     text: "1".to_string(),
                     active: false,
                     active_on_monitor: false
                 },
                 RenderedWorkspace {
                     id: 2,
+                    monitor: "DP-1".to_string(),
+                    local_index: None,
                     text: "dev".to_string(),
                     active: true,
                     active_on_monitor: true
                 },
                 RenderedWorkspace {
                     id: 11,
+                    monitor: "HDMI-A-1".to_string(),
+                    local_index: Some(1),
                     text: "1".to_string(),
                     active: false,
                     active_on_monitor: false
@@ -252,6 +299,8 @@ mod tests {
             render_workspaces(&state, Some("HDMI-A-1"), false),
             vec![RenderedWorkspace {
                 id: 11,
+                monitor: "HDMI-A-1".to_string(),
+                local_index: Some(1),
                 text: "1".to_string(),
                 active: true,
                 active_on_monitor: false

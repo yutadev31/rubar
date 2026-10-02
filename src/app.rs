@@ -64,13 +64,19 @@ impl Shell for App<'_> {
                 position,
                 button,
                 pressed: true,
+                output,
             } => {
+                self.widgets.set_monitor_name(output.as_deref());
                 self.renderer
                     .handle_click(position.x, map_mouse_button(button), &mut self.widgets);
             }
             InputEvent::PointerScroll {
-                position, delta_y, ..
+                position,
+                delta_y,
+                output,
+                ..
             } if delta_y != 0.0 => {
+                self.widgets.set_monitor_name(output.as_deref());
                 self.renderer.handle_scroll(
                     position.x,
                     if delta_y < 0.0 {

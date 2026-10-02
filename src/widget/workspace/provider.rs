@@ -50,7 +50,12 @@ struct HyprActiveWorkspace {
 
 pub(crate) trait WorkspaceProvider: Send {
     fn state(&self) -> Option<WorkspaceState>;
-    fn switch_to(&mut self, workspace_id: i64) -> Result<(), String>;
+    fn switch_to(
+        &mut self,
+        workspace_id: i64,
+        monitor: Option<&str>,
+        local_index: Option<i64>,
+    ) -> Result<(), String>;
 }
 
 pub(crate) fn create(
@@ -180,7 +185,12 @@ impl WorkspaceProvider for IpcProvider {
         self.state.read().ok().and_then(|state| state.clone())
     }
 
-    fn switch_to(&mut self, workspace_id: i64) -> Result<(), String> {
+    fn switch_to(
+        &mut self,
+        workspace_id: i64,
+        _monitor: Option<&str>,
+        _local_index: Option<i64>,
+    ) -> Result<(), String> {
         let name = self
             .workspace_names
             .read()
@@ -417,8 +427,37 @@ impl WorkspaceProvider for HyprlandProvider {
         self.state.read().ok().and_then(|state| state.clone())
     }
 
-    fn switch_to(&mut self, workspace_id: i64) -> Result<(), String> {
+    fn switch_to(
+        &mut self,
+        workspace_id: i64,
+        monitor: Option<&str>,
+        local_index: Option<i64>,
+    ) -> Result<(), String> {
         let socket = self.socket_dir.join(".socket.sock");
+
+        // split-monitor-workspaces resolves N on the currently focused
+        // monitor. Select the monitor represented by the clicked button first.
+        if let (Some(monitor), Some(local_index)) = (monitor, local_index) {
+            let focus_response = send_command(&socket, &format!("dispatch focusmonitor {monitor}"))
+                .map_err(|error| {
+                    format!("could not focus monitor {monitor} for workspace switch: {error}")
+                })?;
+            if !focus_response.starts_with("error") {
+                let split_response = send_command(
+                    &socket,
+                    &format!("dispatch split-workspace {local_index}"),
+                )
+                .map_err(|error| {
+                    format!(
+                        "could not switch to workspace {local_index} on monitor {monitor}: {error}"
+                    )
+                })?;
+                if !split_response.starts_with("error") {
+                    return Ok(());
+                }
+            }
+        }
+
         let legacy_command = format!("dispatch workspace {workspace_id}");
         let response = send_command(&socket, &legacy_command)
             .map_err(|error| format!("could not switch to workspace {workspace_id}: {error}"))?;
@@ -464,7 +503,12 @@ impl WorkspaceProvider for Unavailable {
         None
     }
 
-    fn switch_to(&mut self, _workspace_id: i64) -> Result<(), String> {
+    fn switch_to(
+        &mut self,
+        _workspace_id: i64,
+        _monitor: Option<&str>,
+        _local_index: Option<i64>,
+    ) -> Result<(), String> {
         Err("workspace IPC is unavailable".to_string())
     }
 }

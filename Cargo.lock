@@ -690,7 +690,7 @@ dependencies = [
 [[package]]
 name = "shell-surface"
 version = "0.1.0"
-source = "git+https://github.com/yutadev31/shell-surface.git?rev=89b6a5f53565d949c49ae26f447eadf96dfa96bd#89b6a5f53565d949c49ae26f447eadf96dfa96bd"
+source = "git+https://github.com/yutadev31/shell-surface.git?rev=64394ca9d1b1506de96bb595fbbfb93462ccc290#64394ca9d1b1506de96bb595fbbfb93462ccc290"
 dependencies = [
  "memmap2",
  "tempfile",
