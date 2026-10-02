@@ -198,10 +198,10 @@ impl WorkspaceProvider for IpcProvider {
             .and_then(|names| names.get(&workspace_id).cloned())
             .ok_or_else(|| format!("unknown {} workspace {workspace_id}", self.wm_name))?;
         let response = ipc_request(&self.socket, 0, format!("workspace {name}").as_bytes())?;
-        let result: IpcCommandResult = serde_json::from_slice(&response).map_err(|error| {
+        let result = parse_ipc_command_response(&response).map_err(|error| {
             format!("could not parse {} command response: {error}", self.wm_name)
         })?;
-        if !result.success {
+        if !result {
             return Err(format!("{} rejected workspace {name}", self.wm_name));
         }
         Ok(())
@@ -211,6 +211,23 @@ impl WorkspaceProvider for IpcProvider {
 #[derive(Debug, Deserialize)]
 struct IpcCommandResult {
     success: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum IpcCommandResponse {
+    Single(IpcCommandResult),
+    Multiple(Vec<IpcCommandResult>),
+}
+
+fn parse_ipc_command_response(response: &[u8]) -> Result<bool, serde_json::Error> {
+    let response: IpcCommandResponse = serde_json::from_slice(response)?;
+    Ok(match response {
+        IpcCommandResponse::Single(result) => result.success,
+        IpcCommandResponse::Multiple(results) => {
+            !results.is_empty() && results.iter().all(|result| result.success)
+        }
+    })
 }
 
 fn update_ipc_state(
@@ -616,7 +633,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{configured_workspace_names, is_workspace_event};
+    use super::{configured_workspace_names, is_workspace_event, parse_ipc_command_response};
 
     #[test]
     fn configured_workspace_names_expands_and_deduplicates() {
@@ -631,5 +648,13 @@ mod tests {
         assert!(is_workspace_event("workspace>>2"));
         assert!(is_workspace_event("createworkspace>>3"));
         assert!(!is_workspace_event("openwindow>>address>>workspace"));
+    }
+
+    #[test]
+    fn parses_single_and_array_command_responses() {
+        assert!(parse_ipc_command_response(br#"{"success":true}"#).unwrap());
+        assert!(parse_ipc_command_response(br#"[{"success":true}]"#).unwrap());
+        assert!(!parse_ipc_command_response(br#"[{"success":false}]"#).unwrap());
+        assert!(!parse_ipc_command_response(br#"[]"#).unwrap());
     }
 }
