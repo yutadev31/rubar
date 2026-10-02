@@ -8,10 +8,10 @@ pub mod provider;
 
 pub struct Volume {
     provider: Box<dyn provider::VolumeProvider>,
-    format: String,
-    muted_format: String,
-    microphone_format: String,
-    microphone_muted_format: String,
+    out_format: String,
+    out_muted_format: String,
+    in_format: String,
+    in_muted_format: String,
     refresh_interval: Duration,
     last_refresh: Option<Instant>,
     state: Option<provider::VolumeState>,
@@ -24,10 +24,10 @@ impl Volume {
         });
         Self {
             provider,
-            format: config.format.clone(),
-            muted_format: config.muted_format.clone(),
-            microphone_format: config.microphone_format.clone(),
-            microphone_muted_format: config.microphone_muted_format.clone(),
+            out_format: config.out_format.clone(),
+            out_muted_format: config.out_muted_format.clone(),
+            in_format: config.in_format.clone(),
+            in_muted_format: config.in_muted_format.clone(),
             refresh_interval: Duration::from_secs(config.refresh_seconds.max(1)),
             last_refresh: None,
             state: None,
@@ -44,28 +44,19 @@ impl Widget for Volume {
             self.state = self.provider.read().ok();
             self.last_refresh = Some(Instant::now());
         }
+
         let Some(state) = self.state else {
-            return WidgetContent::Text("VOL --".to_string());
+            return WidgetContent::Buttons(Vec::new());
         };
-        let mut buttons = vec![WidgetButton {
-            text: Some(format_volume(
-                &self.format,
-                &self.muted_format,
-                state.percent,
-                state.muted,
-            )),
-            padding: None,
-            bold: None,
-            color: None,
-            background: None,
-        }];
-        if let Some(microphone) = state.microphone {
+
+        let mut buttons = Vec::new();
+        if let Some(output) = state.output {
             buttons.push(WidgetButton {
                 text: Some(format_volume(
-                    &self.microphone_format,
-                    &self.microphone_muted_format,
-                    microphone.percent,
-                    microphone.muted,
+                    &self.out_format,
+                    &self.out_muted_format,
+                    output.percent,
+                    output.muted,
                 )),
                 padding: None,
                 bold: None,
@@ -73,6 +64,22 @@ impl Widget for Volume {
                 background: None,
             });
         }
+
+        if let Some(input) = state.input {
+            buttons.push(WidgetButton {
+                text: Some(format_volume(
+                    &self.in_format,
+                    &self.in_muted_format,
+                    input.percent,
+                    input.muted,
+                )),
+                padding: None,
+                bold: None,
+                color: None,
+                background: None,
+            });
+        }
+
         WidgetContent::Buttons(buttons)
     }
 
@@ -80,6 +87,7 @@ impl Widget for Volume {
         if button != MouseButton::Left {
             return;
         }
+
         let mut state = match self.state {
             Some(state) => state,
             None => match self.provider.read() {
@@ -90,21 +98,27 @@ impl Widget for Volume {
                 }
             },
         };
+
         let muted = if item == 1 {
-            let Some(microphone) = state.microphone.as_mut() else {
+            let Some(input) = state.input.as_mut() else {
                 return;
             };
-            microphone.muted = !microphone.muted;
-            microphone.muted
+            input.muted = !input.muted;
+            input.muted
         } else {
-            state.muted = !state.muted;
-            state.muted
+            let Some(output) = state.output.as_mut() else {
+                return;
+            };
+            output.muted = !output.muted;
+            output.muted
         };
+
         let result = if item == 1 {
-            self.provider.set_microphone_muted(muted)
+            self.provider.set_in_muted(muted)
         } else {
             self.provider.set_muted(muted)
         };
+
         match result {
             Ok(()) => {
                 self.state = Some(state);
@@ -125,31 +139,40 @@ impl Widget for Volume {
                 }
             },
         };
+
         let change = match direction {
             ScrollDirection::Up => 1,
             ScrollDirection::Down => -1,
         };
+
         let percent = if item == 1 {
-            let Some(microphone) = state.microphone else {
+            let Some(input) = state.input else {
                 return;
             };
-            (microphone.percent as i16 + change).clamp(0, 100) as u8
+            (input.percent as i16 + change).clamp(0, 100) as u8
         } else {
-            (state.percent as i16 + change).clamp(0, 100) as u8
+            let Some(output) = state.output else {
+                return;
+            };
+            (output.percent as i16 + change).clamp(0, 100) as u8
         };
+
         let result = if item == 1 {
-            self.provider.set_microphone_percent(percent)
+            self.provider.set_in_percent(percent)
         } else {
             self.provider.set_percent(percent)
         };
+
         match result {
             Ok(()) => {
                 if item == 1 {
-                    if let Some(microphone) = state.microphone.as_mut() {
-                        microphone.percent = percent;
+                    if let Some(input) = state.input.as_mut() {
+                        input.percent = percent;
                     }
                 } else {
-                    state.percent = percent;
+                    if let Some(output) = state.output.as_mut() {
+                        output.percent = percent;
+                    }
                 }
                 self.state = Some(state);
                 self.last_refresh = Some(Instant::now());

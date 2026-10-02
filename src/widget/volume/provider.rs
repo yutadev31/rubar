@@ -9,13 +9,12 @@ use pulse::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VolumeState {
-    pub percent: u8,
-    pub muted: bool,
-    pub microphone: Option<MicrophoneState>,
+    pub output: Option<VolumeChannelState>,
+    pub input: Option<VolumeChannelState>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MicrophoneState {
+pub struct VolumeChannelState {
     pub percent: u8,
     pub muted: bool,
 }
@@ -31,12 +30,12 @@ pub trait VolumeProvider {
         Err("volume provider does not support changing volume".to_string())
     }
 
-    fn set_microphone_muted(&mut self, _muted: bool) -> Result<(), String> {
-        Err("volume provider does not support muting the microphone".to_string())
+    fn set_in_muted(&mut self, _muted: bool) -> Result<(), String> {
+        Err("volume provider does not support muting the input".to_string())
     }
 
-    fn set_microphone_percent(&mut self, _percent: u8) -> Result<(), String> {
-        Err("volume provider does not support changing microphone volume".to_string())
+    fn set_in_percent(&mut self, _percent: u8) -> Result<(), String> {
+        Err("volume provider does not support changing input volume".to_string())
     }
 }
 
@@ -213,17 +212,19 @@ impl VolumeProvider for PulseAudio {
     fn read(&mut self) -> Result<VolumeState, String> {
         let sink = self.read_default_sink()?;
         let percent = volume_percent(sink.volume.avg().0);
-        let microphone = self
+        let input = self
             .read_default_source()
             .ok()
-            .map(|source| MicrophoneState {
+            .map(|source| VolumeChannelState {
                 percent: volume_percent(source.volume.avg().0),
                 muted: source.mute,
             });
         Ok(VolumeState {
-            percent,
-            muted: sink.mute,
-            microphone,
+            output: Some(VolumeChannelState {
+                percent,
+                muted: sink.mute,
+            }),
+            input,
         })
     }
 
@@ -283,7 +284,7 @@ impl VolumeProvider for PulseAudio {
         Ok(())
     }
 
-    fn set_microphone_muted(&mut self, muted: bool) -> Result<(), String> {
+    fn set_in_muted(&mut self, muted: bool) -> Result<(), String> {
         let source = self.read_default_source()?;
         self.mainloop.borrow_mut().lock();
         let mainloop_ref = Rc::clone(&self.mainloop);
@@ -300,13 +301,13 @@ impl VolumeProvider for PulseAudio {
         let cancelled = operation.get_state() == pulse::operation::State::Cancelled;
         self.mainloop.borrow_mut().unlock();
         if cancelled {
-            Err("PulseAudio microphone mute operation was cancelled".to_string())
+            Err("PulseAudio input mute operation was cancelled".to_string())
         } else {
             Ok(())
         }
     }
 
-    fn set_microphone_percent(&mut self, percent: u8) -> Result<(), String> {
+    fn set_in_percent(&mut self, percent: u8) -> Result<(), String> {
         let source = self.read_default_source()?;
         let value =
             ((percent as f64 / 100.0) * pulse::volume::Volume::NORMAL.0 as f64).round() as u32;
@@ -332,7 +333,7 @@ impl VolumeProvider for PulseAudio {
         let cancelled = operation.get_state() == pulse::operation::State::Cancelled;
         self.mainloop.borrow_mut().unlock();
         if cancelled {
-            Err("PulseAudio microphone volume operation was cancelled".to_string())
+            Err("PulseAudio input volume operation was cancelled".to_string())
         } else {
             Ok(())
         }
