@@ -39,7 +39,7 @@ impl Widget for Battery {
             self.last_refresh = Some(Instant::now());
         }
         let Some(state) = self.state else {
-            return WidgetContent::Text("BAT --".to_string());
+            return WidgetContent::Text("󰁹 --".to_string());
         };
         let charging = state.status.is_charging();
         WidgetContent::Text(
