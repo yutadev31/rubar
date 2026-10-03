@@ -106,9 +106,9 @@ impl Default for VolumeConfig {
     fn default() -> Self {
         Self {
             provider: "pulseaudio".to_string(),
-            out_format: "󰕾 {volume}%".to_string(),
+            out_format: "{volume}% 󰕾".to_string(),
             out_muted_format: "󰖁".to_string(),
-            in_format: "󰍬 {volume}%".to_string(),
+            in_format: "{volume}% 󰍬".to_string(),
             in_muted_format: "󰍭".to_string(),
         }
     }
@@ -118,7 +118,7 @@ impl Default for BatteryConfig {
     fn default() -> Self {
         Self {
             provider: "sysfs".to_string(),
-            format: "󰁹 {percent}%".to_string(),
+            format: "{percent}% 󰁹".to_string(),
             refresh_seconds: 30,
         }
     }
