@@ -46,3 +46,4 @@ cargo run
 - Prioritize maintainability and runtime performance over ease of implementation.
 - Avoid relying on external command execution whenever possible; when it is necessary, prefer using an external library or IPC instead.
 - If the prompt is ambiguous or lacks necessary information, ask clarifying questions before proceeding.
+- After completing work, output an English commit message following the Conventional Commits specification.
