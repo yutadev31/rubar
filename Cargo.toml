@@ -8,13 +8,13 @@ chrono = { version = "0.4", default-features = false, features = [
   "clock",
   "std",
 ] }
-cosmic-text = "0.14"
-dirs = "6"
+cosmic-text = "0.19"
+dirs = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 libpulse-binding = "2.30"
-tiny-skia = "0.11"
+tiny-skia = "0.12"
 shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "64394ca9d1b1506de96bb595fbbfb93462ccc290" }
 
 [dev-dependencies]
