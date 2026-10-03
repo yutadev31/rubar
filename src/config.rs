@@ -49,7 +49,8 @@ pub struct BatteryConfig {
 #[serde(default)]
 pub struct WorkspaceConfig {
     pub format: String,
-    pub button_padding: u32,
+    pub padding: u32,
+    pub spacing: u32,
     pub active_color: String,
     pub active_background_color: String,
     pub all_monitors: bool,
@@ -68,8 +69,6 @@ pub struct StyleConfig {
     pub padding: u32,
     pub spacing: u32,
     pub button_padding: u32,
-    pub button_vertical_padding: u32,
-    pub button_spacing: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,10 +87,8 @@ impl Default for StyleConfig {
             font_family: String::new(),
             bold: false,
             padding: 8,
-            spacing: 16,
-            button_padding: 0,
-            button_vertical_padding: 0,
-            button_spacing: 8,
+            spacing: 8,
+            button_padding: 8,
         }
     }
 }
@@ -131,7 +128,8 @@ impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
             format: "{workspaces}".to_string(),
-            button_padding: 12,
+            padding: 12,
+            spacing: 8,
             active_color: "#7aa2f7".to_string(),
             active_background_color: "#414868".to_string(),
             // A bar now exists on every output, so the workspace module should

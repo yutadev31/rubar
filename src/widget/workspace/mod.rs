@@ -9,7 +9,8 @@ pub struct Workspace {
     format: String,
     active_color: [u8; 4],
     active_background_color: [u8; 4],
-    button_padding: u32,
+    padding: u32,
+    spacing: u32,
     all_monitors: bool,
     monitor_name: Option<String>,
     workspace_targets: Vec<WorkspaceTarget>,
@@ -53,7 +54,8 @@ impl Workspace {
                     [65, 72, 104, 255]
                 },
             ),
-            button_padding: config.button_padding,
+            padding: config.padding,
+            spacing: config.spacing,
             all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_targets: Vec::new(),
@@ -72,7 +74,7 @@ impl Widget for Workspace {
             self.workspace_targets.clear();
             return WidgetContent::Buttons(vec![WidgetButton {
                 text: Some(self.format.replace("{workspaces}", "--")),
-                padding: Some(self.button_padding),
+                padding: Some(self.padding),
                 bold: Some(false),
                 color: None,
                 background: None,
@@ -98,7 +100,7 @@ impl Widget for Workspace {
                             .replace("{workspaces}", &workspace.text)
                             .replace("{active}", &active_id),
                     ),
-                    padding: Some(self.button_padding),
+                    padding: Some(self.padding),
                     bold: Some(workspace.active),
                     // Only the active workspace on the active monitor uses the
                     // configured accent color. Other monitors keep the bar's
@@ -112,6 +114,10 @@ impl Widget for Workspace {
                 })
                 .collect(),
         )
+    }
+
+    fn content_spacing(&self) -> Option<u32> {
+        Some(self.spacing)
     }
 
     fn on_click(&mut self, button: super::MouseButton, item: usize) {

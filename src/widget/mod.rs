@@ -35,6 +35,11 @@ pub struct WidgetButton {
 pub trait Widget {
     fn content(&mut self) -> WidgetContent;
 
+    /// Overrides the style spacing between buttons emitted by this widget.
+    fn content_spacing(&self) -> Option<u32> {
+        None
+    }
+
     fn set_monitor_name(&mut self, _monitor_name: Option<&str>) {}
 
     fn on_click(&mut self, _button: MouseButton, _item: usize) {}

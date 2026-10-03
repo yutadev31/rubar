@@ -30,6 +30,8 @@ struct RenderMetrics {
     text_color: TextColor,
 }
 
+type RenderItem = (usize, usize, WidgetButton, i32, i32, Option<i32>);
+
 impl<'a> BarRenderer<'a> {
     pub fn new(config: &'a StyleConfig) -> Self {
         Self {
@@ -112,31 +114,31 @@ impl<'a> BarRenderer<'a> {
                 }],
                 WidgetContent::Buttons(buttons) => buttons,
             };
+            let content_spacing = widget.content_spacing().map(|spacing| spacing as i32);
             for (button_index, button) in buttons.into_iter().enumerate() {
                 let text_width = button.text.as_deref().map_or(0, |text| {
                     self.measure_text(text, metrics, button.bold.unwrap_or(self.config.bold))
                 });
                 let button_padding = button.padding.unwrap_or(self.config.button_padding) as i32;
-                items.push((index, button_index, button, text_width, button_padding));
+                items.push((
+                    index,
+                    button_index,
+                    button,
+                    text_width,
+                    button_padding,
+                    content_spacing,
+                ));
             }
         }
 
         let spacing = self.config.spacing as i32;
-        let button_vertical_padding = self.config.button_vertical_padding;
-        let button_spacing = self.config.button_spacing as i32;
         let total_width = items
             .iter()
-            .map(|(_, _, _, width, padding)| *width + padding * 2)
+            .map(|(_, _, _, width, padding, _)| *width + padding * 2)
             .sum::<i32>()
             + items
                 .windows(2)
-                .map(|pair| {
-                    if pair[0].0 == pair[1].0 {
-                        button_spacing
-                    } else {
-                        spacing
-                    }
-                })
+                .map(|pair| next_spacing(pair[0].0, pair[1].0, pair[0].5, spacing))
                 .sum::<i32>();
         let mut cursor = match alignment {
             Alignment::Left => self.config.padding as i32,
@@ -149,7 +151,7 @@ impl<'a> BarRenderer<'a> {
         } else {
             items
         };
-        for (position, (index, button_index, button, text_width, button_padding)) in
+        for (position, (index, button_index, button, text_width, button_padding, _)) in
             items.iter().enumerate()
         {
             let index = *index;
@@ -169,7 +171,6 @@ impl<'a> BarRenderer<'a> {
                         cursor - button_width,
                         cursor,
                         metrics.height,
-                        button_vertical_padding,
                         button.background,
                     );
                     self.hitboxes.push(Hitbox::new(
@@ -189,8 +190,7 @@ impl<'a> BarRenderer<'a> {
                             bold,
                         );
                     }
-                    cursor -=
-                        button_width + next_spacing(&items, position, spacing, button_spacing);
+                    cursor -= button_width + next_spacing_for_position(&items, position, spacing);
                 }
                 Alignment::Left | Alignment::Center => {
                     self.draw_button_background(
@@ -198,7 +198,6 @@ impl<'a> BarRenderer<'a> {
                         cursor,
                         cursor + button_width,
                         metrics.height,
-                        button_vertical_padding,
                         button.background,
                     );
                     self.hitboxes.push(Hitbox::new(
@@ -218,8 +217,7 @@ impl<'a> BarRenderer<'a> {
                             bold,
                         );
                     }
-                    cursor +=
-                        button_width + next_spacing(&items, position, spacing, button_spacing);
+                    cursor += button_width + next_spacing_for_position(&items, position, spacing);
                 }
             }
         }
@@ -231,7 +229,6 @@ impl<'a> BarRenderer<'a> {
         left: i32,
         right: i32,
         height: u32,
-        vertical_padding: u32,
         background: Option<[u8; 4]>,
     ) {
         let Some([r, g, b, a]) = background else {
@@ -251,13 +248,7 @@ impl<'a> BarRenderer<'a> {
             return;
         }
 
-        let vertical_padding = vertical_padding.min(height / 2);
-        let y = vertical_padding as f32;
-        let rect_height = height.saturating_sub(vertical_padding * 2) as f32;
-        if rect_height <= 0.0 {
-            return;
-        }
-        let rect = Rect::from_xywh(left, y, width, rect_height)
+        let rect = Rect::from_xywh(left, 0.0, width, height as f32)
             .expect("valid button background rectangle");
         pixmap.fill_rect(rect, &paint, Transform::identity(), None);
     }
@@ -358,21 +349,22 @@ impl<'a> BarRenderer<'a> {
 }
 
 fn next_spacing(
-    items: &[(usize, usize, WidgetButton, i32, i32)],
-    position: usize,
+    current_index: usize,
+    next_index: usize,
+    content_spacing: Option<i32>,
     spacing: i32,
-    button_spacing: i32,
 ) -> i32 {
-    items
-        .get(position + 1)
-        .map(|next| {
-            if items[position].0 == next.0 {
-                button_spacing
-            } else {
-                spacing
-            }
-        })
-        .unwrap_or(0)
+    if current_index == next_index {
+        content_spacing.unwrap_or(spacing)
+    } else {
+        spacing
+    }
+}
+
+fn next_spacing_for_position(items: &[RenderItem], position: usize, spacing: i32) -> i32 {
+    items.get(position + 1).map_or(0, |next| {
+        next_spacing(items[position].0, next.0, items[position].5, spacing)
+    })
 }
 
 #[derive(Clone, Copy)]
