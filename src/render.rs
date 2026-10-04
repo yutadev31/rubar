@@ -259,12 +259,8 @@ impl<'a> BarRenderer<'a> {
             &mut self.font_system,
             Metrics::new(metrics.font_size, line_height),
         );
-        buffer.set_size(
-            &mut self.font_system,
-            Some(metrics.width as f32),
-            Some(metrics.height as f32),
-        );
-        buffer.set_wrap(&mut self.font_system, Wrap::None);
+        buffer.set_size(Some(metrics.width as f32), Some(metrics.height as f32));
+        buffer.set_wrap(Wrap::None);
         let mut attrs = Attrs::new().color(metrics.text_color);
         if !self.config.font_family.is_empty() {
             attrs = attrs.family(Family::Name(&self.config.font_family));
@@ -272,7 +268,7 @@ impl<'a> BarRenderer<'a> {
         if bold {
             attrs = attrs.weight(Weight::BOLD);
         }
-        buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, false);
         buffer
             .layout_runs()
@@ -295,12 +291,8 @@ impl<'a> BarRenderer<'a> {
             &mut self.font_system,
             Metrics::new(metrics.font_size, line_height),
         );
-        buffer.set_size(
-            &mut self.font_system,
-            Some(pixmap.width() as f32),
-            Some(metrics.height as f32),
-        );
-        buffer.set_wrap(&mut self.font_system, Wrap::None);
+        buffer.set_size(Some(pixmap.width() as f32), Some(metrics.height as f32));
+        buffer.set_wrap(Wrap::None);
         let mut attrs = Attrs::new().color(text_color);
         if !self.config.font_family.is_empty() {
             attrs = attrs.family(Family::Name(&self.config.font_family));
@@ -308,7 +300,7 @@ impl<'a> BarRenderer<'a> {
         if bold {
             attrs = attrs.weight(Weight::BOLD);
         }
-        buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, false);
         let text_width = buffer
             .layout_runs()
