@@ -41,7 +41,7 @@ cargo run
 
 - Do not make temporary workarounds that prioritize immediate behavior over a fundamental solution, or introduce fixes that are not root-cause fixes.
 - When improving compatibility would reduce readability, prioritize readability over compatibility.
-- Keep changes as small as necessary and do not combine them with unrelated refactoring.
+- Keep changes as small as necessary and do not combine them with unrelated refactoring. However, when the task itself is refactoring, changes do not need to be minimal; prefer broader refactoring where appropriate, as long as existing behavior is preserved.
 - Do not silently ignore errors; handle them in a way that makes their causes identifiable whenever possible.
 - Prioritize maintainability and runtime performance over ease of implementation.
 - Avoid relying on external command execution whenever possible; when it is necessary, prefer using an external library or IPC instead.

@@ -10,6 +10,7 @@ pub struct Config {
     pub modules: ModulesConfig,
     pub volume: VolumeConfig,
     pub workspace: WorkspaceConfig,
+    pub window: WindowConfig,
     pub style: StyleConfig,
 }
 
@@ -57,6 +58,13 @@ pub struct WorkspaceConfig {
     pub all_monitors: bool,
     /// Numeric workspaces that should always be shown by i3/Sway.
     pub persistent_workspaces: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct WindowConfig {
+    pub format: String,
+    pub padding: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -139,6 +147,15 @@ impl Default for WorkspaceConfig {
             // who prefer the focused monitor only can still set this to false.
             all_monitors: true,
             persistent_workspaces: Vec::new(),
+        }
+    }
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            format: "{title}".to_string(),
+            padding: 10,
         }
     }
 }

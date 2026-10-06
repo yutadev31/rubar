@@ -39,7 +39,7 @@ pub trait BatteryProvider {
 pub fn create(name: &str) -> Result<Box<dyn BatteryProvider>, String> {
     match name {
         "auto" => {
-            let provider = Sysfs::new("/sys/class/power_supply");
+            let mut provider = Sysfs::new("/sys/class/power_supply");
             provider.read()?;
             Ok(Box::new(provider))
         }

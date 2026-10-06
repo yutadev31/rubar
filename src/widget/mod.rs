@@ -2,6 +2,7 @@ pub mod battery;
 pub mod clock;
 pub mod tray;
 pub mod volume;
+pub mod window;
 pub mod workspace;
 
 pub use crate::render::{

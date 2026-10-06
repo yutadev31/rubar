@@ -4,7 +4,7 @@ use crate::{
     config::Config,
     render::BarRenderer,
     widget::{
-        WidgetGroups, battery::Battery, clock::Clock, tray::Tray, volume::Volume,
+        WidgetGroups, battery::Battery, clock::Clock, tray::Tray, volume::Volume, window::Window,
         workspace::Workspace,
     },
 };
@@ -16,19 +16,23 @@ use shell_surface::{
 pub struct App<'a> {
     renderer: BarRenderer<'a>,
     widgets: WidgetGroups,
+    _ipc_clients: crate::provider::wm::Clients,
     surfaces: Vec<SurfaceConfig>,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: &'a Config) -> Result<Self, Box<dyn Error>> {
+        let ipc_clients =
+            crate::provider::wm::Clients::connect(&config.workspace.persistent_workspaces);
         let widgets = WidgetGroups {
-            left: create_widgets(&config.modules.left, config)?,
-            center: create_widgets(&config.modules.center, config)?,
-            right: create_widgets(&config.modules.right, config)?,
+            left: create_widgets(&config.modules.left, config, &ipc_clients)?,
+            center: create_widgets(&config.modules.center, config, &ipc_clients)?,
+            right: create_widgets(&config.modules.right, config, &ipc_clients)?,
         };
         Ok(Self {
             renderer: BarRenderer::new(&config.style),
             widgets,
+            _ipc_clients: ipc_clients,
             surfaces: vec![panel_surface_config(&config.style)],
         })
     }
@@ -132,6 +136,7 @@ fn map_mouse_button(button: SurfaceMouseButton) -> crate::widget::MouseButton {
 fn create_widgets(
     names: &[String],
     config: &Config,
+    ipc_clients: &crate::provider::wm::Clients,
 ) -> Result<Vec<Box<dyn crate::widget::Widget>>, Box<dyn Error>> {
     names
         .iter()
@@ -141,9 +146,14 @@ fn create_widgets(
                 Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>)
             }
             "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
-            "workspace" => {
-                Ok(Box::new(Workspace::new(&config.workspace)) as Box<dyn crate::widget::Widget>)
-            }
+            "workspace" => Ok(Box::new(Workspace::new(
+                &config.workspace,
+                ipc_clients.workspace.clone(),
+            )) as Box<dyn crate::widget::Widget>),
+            "window" => Ok(
+                Box::new(Window::new(&config.window, ipc_clients.window.clone()))
+                    as Box<dyn crate::widget::Widget>,
+            ),
             "tray" => {
                 Ok(Box::new(Tray::new(config.style.clone())) as Box<dyn crate::widget::Widget>)
             }

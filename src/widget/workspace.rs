@@ -1,9 +1,10 @@
-use crate::config::WorkspaceConfig;
+use crate::{
+    config::WorkspaceConfig,
+    provider::wm::{WorkspaceProvider, WorkspaceState},
+};
+use std::sync::Arc;
 
 use super::{Widget, WidgetButton, WidgetContent};
-
-pub mod provider;
-use provider::{WorkspaceProvider, WorkspaceState};
 
 pub struct Workspace {
     format: String,
@@ -15,7 +16,7 @@ pub struct Workspace {
     all_monitors: bool,
     monitor_name: Option<String>,
     workspace_targets: Vec<WorkspaceTarget>,
-    provider: Box<dyn WorkspaceProvider>,
+    provider: Arc<dyn WorkspaceProvider>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,7 @@ impl From<&RenderedWorkspace> for WorkspaceTarget {
 }
 
 impl Workspace {
-    pub fn new(config: &WorkspaceConfig) -> Self {
+    pub fn new(config: &WorkspaceConfig, provider: Arc<dyn WorkspaceProvider>) -> Self {
         Self {
             format: config.format.clone(),
             active_color: parse_color(&config.active_color).unwrap_or_else(|error| {
@@ -72,7 +73,7 @@ impl Workspace {
             all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_targets: Vec::new(),
-            provider: provider::create(&config.persistent_workspaces),
+            provider,
         }
     }
 }
@@ -227,25 +228,26 @@ fn render_workspaces(
 mod tests {
     use std::collections::HashMap;
 
-    use super::{RenderedWorkspace, WorkspaceState, provider::HyprWorkspace, render_workspaces};
+    use super::{RenderedWorkspace, WorkspaceState, render_workspaces};
+    use crate::provider::wm::Workspace;
 
     #[test]
     fn workspaces_are_rendered_with_active_workspace_marked() {
         let state = WorkspaceState {
             workspaces: vec![
-                HyprWorkspace {
+                Workspace {
                     id: 1,
                     name: "1".to_string(),
                     monitor_id: 0,
                     monitor: "DP-1".to_string(),
                 },
-                HyprWorkspace {
+                Workspace {
                     id: 2,
                     name: "dev".to_string(),
                     monitor_id: 0,
                     monitor: "DP-1".to_string(),
                 },
-                HyprWorkspace {
+                Workspace {
                     id: 11,
                     name: "1".to_string(),
                     monitor_id: 1,
