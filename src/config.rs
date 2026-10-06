@@ -16,7 +16,7 @@ pub struct Config {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ClockConfig {
-    pub show_seconds: bool,
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
