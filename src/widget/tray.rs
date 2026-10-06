@@ -11,7 +11,7 @@ use zbus::{
     object_server::SignalEmitter,
 };
 
-use crate::widget::{TrayIcon, Widget, WidgetButton, WidgetContent};
+use crate::widget::{MouseButton, TrayIcon, Widget, WidgetButton, WidgetContent};
 
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const WATCHER_INTERFACE: &str = "org.kde.StatusNotifierWatcher";
@@ -62,6 +62,34 @@ impl Widget for Tray {
                 })
                 .collect(),
         )
+    }
+
+    fn on_click(&mut self, button: MouseButton, item: usize) {
+        let method = match button {
+            MouseButton::Left => "Activate",
+            MouseButton::Middle => "SecondaryActivate",
+            _ => return,
+        };
+        let Some(item) = self.items.get(item).cloned() else {
+            return;
+        };
+
+        thread::spawn(move || {
+            let result = (|| {
+                let connection = Connection::session()?;
+                let proxy = Proxy::new(
+                    &connection,
+                    item.service.as_str(),
+                    item.path.as_str(),
+                    ITEM_INTERFACE,
+                )?;
+                proxy.call_method(method, &(0_i32, 0_i32))?;
+                Ok::<_, zbus::Error>(())
+            })();
+            if let Err(error) = result {
+                eprintln!("rubar: could not call tray item {method}: {error}");
+            }
+        });
     }
 }
 
