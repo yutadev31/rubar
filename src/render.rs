@@ -7,9 +7,62 @@ use cosmic_text::{
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 
 use crate::config::StyleConfig;
-use crate::widget::{
-    MouseButton, ScrollDirection, Widget, WidgetButton, WidgetContent, WidgetGroups,
-};
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+    Other(u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollDirection {
+    Up,
+    Down,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ClickContext<'a> {
+    pub button_left: i32,
+    pub surface_width: u32,
+    pub output: Option<&'a str>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RenderContent {
+    Text(String),
+    Buttons(Vec<RenderButton>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct RenderButton {
+    pub text: Option<String>,
+    pub icon: Option<RenderIcon>,
+    pub padding: Option<u32>,
+    pub bold: Option<bool>,
+    pub color: Option<[u8; 4]>,
+    pub background: Option<[u8; 4]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderIcon {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+pub trait RenderWidget {
+    fn content(&mut self) -> RenderContent;
+    fn content_spacing(&self) -> Option<u32> {
+        None
+    }
+    fn set_monitor_name(&mut self, _monitor_name: Option<&str>) {}
+    fn on_click(&mut self, _button: MouseButton, _item: usize) {}
+    fn on_click_at(&mut self, button: MouseButton, item: usize, _context: ClickContext<'_>) {
+        self.on_click(button, item);
+    }
+    fn on_scroll(&mut self, _direction: ScrollDirection, _item: usize) {}
+}
 
 /// Renderer shared by window-system backends.
 ///
@@ -30,7 +83,7 @@ struct RenderMetrics {
     text_color: TextColor,
 }
 
-type RenderItem = (usize, usize, WidgetButton, i32, i32, Option<i32>);
+type RenderItem = (usize, usize, RenderButton, i32, i32, Option<i32>);
 
 impl<'a> BarRenderer<'a> {
     pub fn new(config: &'a StyleConfig) -> Self {
@@ -42,7 +95,14 @@ impl<'a> BarRenderer<'a> {
         }
     }
 
-    pub fn render(&mut self, width: u32, height: u32, widgets: &mut WidgetGroups) -> Vec<u8> {
+    pub fn render(
+        &mut self,
+        width: u32,
+        height: u32,
+        left: &mut [Box<dyn RenderWidget>],
+        center: &mut [Box<dyn RenderWidget>],
+        right: &mut [Box<dyn RenderWidget>],
+    ) -> Vec<u8> {
         let mut pixmap = Pixmap::new(width, height).expect("valid bar dimensions");
         let background = parse_color(&self.config.colors.bg).expect("validated background color");
         let text = parse_rgba(&self.config.colors.text).expect("validated text color");
@@ -56,14 +116,9 @@ impl<'a> BarRenderer<'a> {
         pixmap.fill(background);
         self.hitboxes.clear();
 
-        self.draw_group(&mut pixmap, &mut widgets.left, &metrics, Alignment::Left);
-        self.draw_group(
-            &mut pixmap,
-            &mut widgets.center,
-            &metrics,
-            Alignment::Center,
-        );
-        self.draw_group(&mut pixmap, &mut widgets.right, &metrics, Alignment::Right);
+        self.draw_group(&mut pixmap, left, &metrics, Alignment::Left);
+        self.draw_group(&mut pixmap, center, &metrics, Alignment::Center);
+        self.draw_group(&mut pixmap, right, &metrics, Alignment::Right);
 
         // tiny-skia stores RGBA pixels. On little-endian machines Wayland's
         // ARGB8888 shm format is laid out as B,G,R,A, so convert explicitly.
@@ -74,9 +129,17 @@ impl<'a> BarRenderer<'a> {
             .collect()
     }
 
-    pub fn handle_click(&self, x: f64, button: MouseButton, widgets: &mut WidgetGroups) {
+    pub fn handle_click(
+        &self,
+        x: f64,
+        button: MouseButton,
+        output: Option<&str>,
+        left: &mut [Box<dyn RenderWidget>],
+        center: &mut [Box<dyn RenderWidget>],
+        right: &mut [Box<dyn RenderWidget>],
+    ) {
         if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
-            hitbox.dispatch_click(button, widgets);
+            hitbox.dispatch_click(button, output, left, center, right);
         }
     }
 
@@ -84,10 +147,12 @@ impl<'a> BarRenderer<'a> {
         &self,
         x: f64,
         direction: ScrollDirection,
-        widgets: &mut WidgetGroups,
+        left: &mut [Box<dyn RenderWidget>],
+        center: &mut [Box<dyn RenderWidget>],
+        right: &mut [Box<dyn RenderWidget>],
     ) -> bool {
         if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
-            hitbox.dispatch_scroll(direction, widgets);
+            hitbox.dispatch_scroll(direction, left, center, right);
             true
         } else {
             false
@@ -97,7 +162,7 @@ impl<'a> BarRenderer<'a> {
     fn draw_group(
         &mut self,
         pixmap: &mut Pixmap,
-        widgets: &mut [Box<dyn Widget>],
+        widgets: &mut [Box<dyn RenderWidget>],
         metrics: &RenderMetrics,
         alignment: Alignment,
     ) {
@@ -105,14 +170,15 @@ impl<'a> BarRenderer<'a> {
         for (index, widget) in widgets.iter_mut().enumerate() {
             let content = widget.content();
             let buttons = match content {
-                WidgetContent::Text(text) => vec![WidgetButton {
+                RenderContent::Text(text) => vec![RenderButton {
                     text: Some(text),
+                    icon: None,
                     padding: None,
                     bold: None,
                     color: None,
                     background: None,
                 }],
-                WidgetContent::Buttons(buttons) => buttons,
+                RenderContent::Buttons(buttons) => buttons,
             };
             let content_spacing = widget.content_spacing().map(|spacing| spacing as i32);
             for (button_index, button) in buttons.into_iter().enumerate() {
@@ -134,7 +200,10 @@ impl<'a> BarRenderer<'a> {
         let spacing = self.config.spacing as i32;
         let total_width = items
             .iter()
-            .map(|(_, _, _, width, padding, _)| *width + padding * 2)
+            .map(|(_, _, button, width, padding, _)| {
+                let icon_width = button.icon.as_ref().map_or(0, |icon| icon.width as i32);
+                (*width).max(icon_width) + padding * 2
+            })
             .sum::<i32>()
             + items
                 .windows(2)
@@ -158,7 +227,9 @@ impl<'a> BarRenderer<'a> {
             let button_index = *button_index;
             let text_width = *text_width;
             let button_padding = *button_padding;
-            let button_width = text_width + button_padding * 2;
+            let icon_width = button.icon.as_ref().map_or(0, |icon| icon.width as i32);
+            let content_width = text_width.max(icon_width);
+            let button_width = content_width + button_padding * 2;
             let bold = button.bold.unwrap_or(self.config.bold);
             let button_color = button
                 .color
@@ -176,6 +247,7 @@ impl<'a> BarRenderer<'a> {
                     self.hitboxes.push(Hitbox::new(
                         cursor - button_width,
                         cursor,
+                        metrics.width,
                         alignment,
                         index,
                         button_index,
@@ -190,6 +262,9 @@ impl<'a> BarRenderer<'a> {
                             bold,
                         );
                     }
+                    if let Some(icon) = button.icon.as_ref() {
+                        self.draw_icon(pixmap, icon, cursor - button_padding - icon_width);
+                    }
                     cursor -= button_width + next_spacing_for_position(&items, position, spacing);
                 }
                 Alignment::Left | Alignment::Center => {
@@ -203,6 +278,7 @@ impl<'a> BarRenderer<'a> {
                     self.hitboxes.push(Hitbox::new(
                         cursor,
                         cursor + button_width,
+                        metrics.width,
                         alignment,
                         index,
                         button_index,
@@ -216,6 +292,9 @@ impl<'a> BarRenderer<'a> {
                             button_color,
                             bold,
                         );
+                    }
+                    if let Some(icon) = button.icon.as_ref() {
+                        self.draw_icon(pixmap, icon, cursor + button_padding);
                     }
                     cursor += button_width + next_spacing_for_position(&items, position, spacing);
                 }
@@ -338,6 +417,52 @@ impl<'a> BarRenderer<'a> {
         );
         text_width
     }
+
+    fn draw_icon(&self, pixmap: &mut Pixmap, icon: &RenderIcon, x: i32) {
+        if icon.width == 0
+            || icon.height == 0
+            || icon.pixels.len()
+                != (icon.width as usize)
+                    .saturating_mul(icon.height as usize)
+                    .saturating_mul(4)
+        {
+            return;
+        }
+        let y = ((pixmap.height() as i32 - icon.height as i32) / 2).max(0);
+        for iy in 0..icon.height {
+            for ix in 0..icon.width {
+                let px = x + ix as i32;
+                let py = y + iy as i32;
+                if px < 0 || py < 0 || px >= pixmap.width() as i32 || py >= pixmap.height() as i32 {
+                    continue;
+                }
+                let source = (iy as usize * icon.width as usize + ix as usize) * 4;
+                let destination = (py as usize * pixmap.width() as usize + px as usize) * 4;
+                let [sr, sg, sb, sa] = [
+                    icon.pixels[source],
+                    icon.pixels[source + 1],
+                    icon.pixels[source + 2],
+                    icon.pixels[source + 3],
+                ];
+                let da = pixmap.data()[destination + 3];
+                let alpha = sa as u16 + ((da as u16 * (255 - sa as u16)) / 255);
+                if alpha == 0 {
+                    continue;
+                }
+                let inverse = 255 - sa as u16;
+                let data = pixmap.data_mut();
+                let dr = data[destination];
+                let dg = data[destination + 1];
+                let db = data[destination + 2];
+                data[destination..destination + 4].copy_from_slice(&[
+                    (sr as u16 + dr as u16 * inverse / 255).min(255) as u8,
+                    (sg as u16 + dg as u16 * inverse / 255).min(255) as u8,
+                    (sb as u16 + db as u16 * inverse / 255).min(255) as u8,
+                    alpha.min(255) as u8,
+                ]);
+            }
+        }
+    }
 }
 
 fn next_spacing(
@@ -369,16 +494,25 @@ enum Alignment {
 struct Hitbox {
     left: i32,
     right: i32,
+    surface_width: u32,
     alignment: Alignment,
     index: usize,
     item: usize,
 }
 
 impl Hitbox {
-    fn new(left: i32, right: i32, alignment: Alignment, index: usize, item: usize) -> Self {
+    fn new(
+        left: i32,
+        right: i32,
+        surface_width: u32,
+        alignment: Alignment,
+        index: usize,
+        item: usize,
+    ) -> Self {
         Self {
             left,
             right,
+            surface_width,
             alignment,
             index,
             item,
@@ -389,19 +523,37 @@ impl Hitbox {
         x >= self.left as f64 && x < self.right as f64
     }
 
-    fn dispatch_click(&self, button: MouseButton, widgets: &mut WidgetGroups) {
+    fn dispatch_click(
+        &self,
+        button: MouseButton,
+        output: Option<&str>,
+        left: &mut [Box<dyn RenderWidget>],
+        center: &mut [Box<dyn RenderWidget>],
+        right: &mut [Box<dyn RenderWidget>],
+    ) {
+        let context = ClickContext {
+            button_left: self.left,
+            surface_width: self.surface_width,
+            output,
+        };
         match self.alignment {
-            Alignment::Left => widgets.left[self.index].on_click(button, self.item),
-            Alignment::Center => widgets.center[self.index].on_click(button, self.item),
-            Alignment::Right => widgets.right[self.index].on_click(button, self.item),
+            Alignment::Left => left[self.index].on_click_at(button, self.item, context),
+            Alignment::Center => center[self.index].on_click_at(button, self.item, context),
+            Alignment::Right => right[self.index].on_click_at(button, self.item, context),
         }
     }
 
-    fn dispatch_scroll(&self, direction: ScrollDirection, widgets: &mut WidgetGroups) {
+    fn dispatch_scroll(
+        &self,
+        direction: ScrollDirection,
+        left: &mut [Box<dyn RenderWidget>],
+        center: &mut [Box<dyn RenderWidget>],
+        right: &mut [Box<dyn RenderWidget>],
+    ) {
         match self.alignment {
-            Alignment::Left => widgets.left[self.index].on_scroll(direction, self.item),
-            Alignment::Center => widgets.center[self.index].on_scroll(direction, self.item),
-            Alignment::Right => widgets.right[self.index].on_scroll(direction, self.item),
+            Alignment::Left => left[self.index].on_scroll(direction, self.item),
+            Alignment::Center => center[self.index].on_scroll(direction, self.item),
+            Alignment::Right => right[self.index].on_scroll(direction, self.item),
         }
     }
 }
@@ -411,7 +563,7 @@ fn parse_color(value: &str) -> Result<Color, Box<dyn Error>> {
     Ok(Color::from_rgba8(r, g, b, a))
 }
 
-fn parse_rgba(value: &str) -> Result<[u8; 4], Box<dyn Error>> {
+pub(crate) fn parse_rgba(value: &str) -> Result<[u8; 4], Box<dyn Error>> {
     let hex = value.strip_prefix('#').unwrap_or(value);
     let (rgb, alpha) = match hex.len() {
         6 => (hex, 255),

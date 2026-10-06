@@ -74,6 +74,7 @@ impl Widget for Workspace {
             self.workspace_targets.clear();
             return WidgetContent::Buttons(vec![WidgetButton {
                 text: Some(self.format.replace("{workspaces}", "--")),
+                icon: None,
                 padding: Some(self.padding),
                 bold: Some(false),
                 color: None,
@@ -100,6 +101,7 @@ impl Widget for Workspace {
                             .replace("{workspaces}", &workspace.text)
                             .replace("{active}", &active_id),
                     ),
+                    icon: None,
                     padding: Some(self.padding),
                     bold: Some(workspace.active),
                     // Only the active workspace on the active monitor uses the
