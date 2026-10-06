@@ -535,13 +535,17 @@ fn load_png_icon(path: &Path) -> Option<TrayIcon> {
     let rgba = match info.color_type {
         png::ColorType::Rgba => bytes[..info.buffer_size()].to_vec(),
         png::ColorType::Rgb => bytes[..info.buffer_size()]
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|px| [px[0], px[1], px[2], 255])
             .collect(),
         _ => return None,
     };
     let pixels = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| {
             let alpha = px[3] as u16;
             [
@@ -575,8 +579,8 @@ mod tests {
         let icon = choose_icon(
             &[
                 (8, 8, vec![0; 8 * 8 * 4]),
-                (16, 16, vec![128, 255, 64, 32].repeat(16 * 16)),
-                (32, 32, vec![255, 1, 2, 3].repeat(32 * 32)),
+                (16, 16, [128, 255, 64, 32].repeat(16 * 16)),
+                (32, 32, [255, 1, 2, 3].repeat(32 * 32)),
             ],
             16,
         )
