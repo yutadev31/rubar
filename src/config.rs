@@ -69,7 +69,7 @@ pub struct StyleConfig {
     pub bold: bool,
     pub padding: u32,
     pub spacing: u32,
-    pub button_padding: u32,
+    pub button_spacing: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -87,9 +87,9 @@ impl Default for StyleConfig {
             font_size: 14.0,
             font_family: String::new(),
             bold: false,
-            padding: 8,
-            spacing: 8,
-            button_padding: 8,
+            padding: 6,
+            spacing: 12,
+            button_spacing: 4,
         }
     }
 }

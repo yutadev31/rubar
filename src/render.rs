@@ -187,7 +187,7 @@ impl<'a> BarRenderer<'a> {
                 let text_width = button.text.as_deref().map_or(0, |text| {
                     self.measure_text(text, metrics, button.bold.unwrap_or(self.config.bold))
                 });
-                let button_padding = button.padding.unwrap_or(self.config.button_padding) as i32;
+                let button_padding = button.padding.unwrap_or(self.config.padding) as i32;
                 items.push((
                     index,
                     button_index,
@@ -200,6 +200,7 @@ impl<'a> BarRenderer<'a> {
         }
 
         let spacing = self.config.spacing as i32;
+        let button_spacing = self.config.button_spacing as i32;
         let total_width = items
             .iter()
             .map(|(_, _, button, width, padding, _)| {
@@ -209,7 +210,7 @@ impl<'a> BarRenderer<'a> {
             .sum::<i32>()
             + items
                 .windows(2)
-                .map(|pair| next_spacing(pair[0].0, pair[1].0, pair[0].5, spacing))
+                .map(|pair| next_spacing(pair[0].0, pair[1].0, pair[0].5, spacing, button_spacing))
                 .sum::<i32>();
         let mut cursor = match alignment {
             Alignment::Left => self.config.padding as i32,
@@ -274,7 +275,8 @@ impl<'a> BarRenderer<'a> {
                     if let Some(icon) = button.icon.as_ref() {
                         self.draw_icon(pixmap, icon, cursor - button_padding - icon_width);
                     }
-                    cursor -= button_width + next_spacing_for_position(&items, position, spacing);
+                    cursor -= button_width
+                        + next_spacing_for_position(&items, position, spacing, button_spacing);
                 }
                 Alignment::Left | Alignment::Center => {
                     self.draw_button_background(
@@ -312,7 +314,8 @@ impl<'a> BarRenderer<'a> {
                     if let Some(icon) = button.icon.as_ref() {
                         self.draw_icon(pixmap, icon, cursor + button_padding);
                     }
-                    cursor += button_width + next_spacing_for_position(&items, position, spacing);
+                    cursor += button_width
+                        + next_spacing_for_position(&items, position, spacing, button_spacing);
                 }
             }
         }
@@ -519,17 +522,29 @@ fn next_spacing(
     next_index: usize,
     content_spacing: Option<i32>,
     spacing: i32,
+    button_spacing: i32,
 ) -> i32 {
     if current_index == next_index {
-        content_spacing.unwrap_or(spacing)
+        content_spacing.unwrap_or(button_spacing)
     } else {
         spacing
     }
 }
 
-fn next_spacing_for_position(items: &[RenderItem], position: usize, spacing: i32) -> i32 {
+fn next_spacing_for_position(
+    items: &[RenderItem],
+    position: usize,
+    spacing: i32,
+    button_spacing: i32,
+) -> i32 {
     items.get(position + 1).map_or(0, |next| {
-        next_spacing(items[position].0, next.0, items[position].5, spacing)
+        next_spacing(
+            items[position].0,
+            next.0,
+            items[position].5,
+            spacing,
+            button_spacing,
+        )
     })
 }
 
