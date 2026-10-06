@@ -292,7 +292,9 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
         else {
             continue;
         };
-        if !old_owner.is_empty() || !new_owner.is_empty() {
+        // A disappearing service has an old owner and no new owner. Ignore
+        // acquisitions and ownership changes where another owner takes over.
+        if old_owner.is_empty() || !new_owner.is_empty() {
             continue;
         }
         let removed = items.lock().expect("SNI item lock poisoned").remove(&name);
