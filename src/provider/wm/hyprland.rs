@@ -1,6 +1,4 @@
-use crate::provider::wm::WindowProvider;
-
-use super::{Workspace, WorkspaceProvider, WorkspaceState};
+use super::{WmClient, Workspace, WorkspaceState};
 use serde::Deserialize;
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -29,34 +27,42 @@ struct HyprActiveWorkspace {
     id: i64,
 }
 
-pub(crate) struct HyprlandProvider {
+pub(crate) struct HyprlandClient {
     socket_dir: PathBuf,
     state: Arc<RwLock<Option<WorkspaceState>>>,
+    title: Arc<RwLock<Option<String>>>,
 }
 
-impl HyprlandProvider {
+impl HyprlandClient {
     pub(crate) fn new(reconnect_interval: Duration) -> Result<Self, String> {
         let socket_dir = hyprland_socket_dir()?;
         let state = Arc::new(RwLock::new(None));
+        let title = Arc::new(RwLock::new(read_window_title(&socket_dir)?));
         update_state(&socket_dir, &state);
 
         let event_socket = socket_dir.join(".socket2.sock");
         let command_socket = socket_dir.clone();
         let shared_state = Arc::clone(&state);
+        let shared_title = Arc::clone(&title);
         thread::spawn(move || {
             event_loop(
                 event_socket,
                 command_socket,
                 shared_state,
+                shared_title,
                 reconnect_interval,
             )
         });
 
-        Ok(Self { socket_dir, state })
+        Ok(Self {
+            socket_dir,
+            state,
+            title,
+        })
     }
 }
 
-impl WorkspaceProvider for HyprlandProvider {
+impl WmClient for HyprlandClient {
     fn state(&self) -> Option<WorkspaceState> {
         self.state.read().ok().and_then(|state| state.clone())
     }
@@ -111,6 +117,10 @@ impl WorkspaceProvider for HyprlandProvider {
         }
         Ok(())
     }
+
+    fn title(&self) -> Option<String> {
+        self.title.read().ok().and_then(|title| title.clone())
+    }
 }
 
 fn send_command(socket: &Path, command: &str) -> Result<String, String> {
@@ -142,6 +152,7 @@ fn event_loop(
     event_socket: PathBuf,
     command_socket: PathBuf,
     state: Arc<RwLock<Option<WorkspaceState>>>,
+    title: Arc<RwLock<Option<String>>>,
     reconnect_interval: Duration,
 ) {
     loop {
@@ -151,7 +162,19 @@ fn event_loop(
                 for line in reader.lines() {
                     match line {
                         Ok(event) if is_workspace_event(&event) => {
-                            update_state(&command_socket, &state);
+                            update_state(&command_socket, &state)
+                        }
+                        Ok(event) if is_window_event(&event) => {
+                            match read_window_title(&command_socket) {
+                                Ok(value) => {
+                                    if let Ok(mut target) = title.write() {
+                                        *target = value;
+                                    }
+                                }
+                                Err(error) => eprintln!(
+                                    "rubar: could not read Hyprland focused window: {error}"
+                                ),
+                            }
                         }
                         Ok(_) => {}
                         Err(error) => {
@@ -182,6 +205,13 @@ fn is_workspace_event(event: &str) -> bool {
                 | "activespecial"
                 | "activelayout"
         )
+    )
+}
+
+fn is_window_event(event: &str) -> bool {
+    matches!(
+        event.split_once(">>").map(|(name, _)| name),
+        Some("activewindow" | "activewindowv2" | "openwindow" | "closewindow")
     )
 }
 
@@ -231,58 +261,6 @@ where
         .map_err(|error| format!("could not parse Hyprland response: {error}"))
 }
 
-pub(crate) struct WindowClient {
-    title: Arc<RwLock<Option<String>>>,
-}
-impl WindowClient {
-    pub(crate) fn new() -> Result<Self, String> {
-        let dir = hyprland_socket_dir()?;
-        let title = Arc::new(RwLock::new(read_window_title(&dir)?));
-        let event = dir.join(".socket2.sock");
-        let shared = Arc::clone(&title);
-        thread::spawn(move || {
-            loop {
-                if let Ok(stream) = UnixStream::connect(&event) {
-                    for line in BufReader::new(stream).lines() {
-                        match line {
-                            Ok(line)
-                                if matches!(
-                                    line.split_once(">>").map(|v| v.0),
-                                    Some(
-                                        "activewindow"
-                                            | "activewindowv2"
-                                            | "openwindow"
-                                            | "closewindow"
-                                    )
-                                ) =>
-                            {
-                                match read_window_title(&dir) {
-                                    Ok(value) => {
-                                        if let Ok(mut title) = shared.write() {
-                                            *title = value;
-                                        }
-                                    }
-                                    Err(error) => eprintln!(
-                                        "rubar: could not read Hyprland focused window: {error}"
-                                    ),
-                                }
-                            }
-                            Ok(_) => {}
-                            Err(_) => break,
-                        }
-                    }
-                }
-                thread::sleep(Duration::from_secs(1));
-            }
-        });
-        Ok(Self { title })
-    }
-}
-impl WindowProvider for WindowClient {
-    fn title(&self) -> Option<String> {
-        self.title.read().ok().and_then(|title| title.clone())
-    }
-}
 fn read_window_title(dir: &Path) -> Result<Option<String>, String> {
     let value: serde_json::Value = request_json(dir, "j/activewindow")?;
     Ok(value

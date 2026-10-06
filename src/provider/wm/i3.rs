@@ -1,6 +1,4 @@
-use crate::provider::wm::WindowProvider;
-
-use super::{Workspace, WorkspaceProvider, WorkspaceState};
+use super::{WmClient, Workspace, WorkspaceState};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -13,11 +11,12 @@ use std::{
 };
 
 /// Workspace provider for i3 and Sway, which share the i3 IPC protocol.
-pub(crate) struct I3WorkspaceProvider {
+pub(crate) struct I3Client {
     wm_name: &'static str,
     socket: PathBuf,
     state: Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: Arc<RwLock<HashMap<i64, String>>>,
+    title: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -30,7 +29,7 @@ struct IpcWorkspace {
     visible: bool,
 }
 
-impl I3WorkspaceProvider {
+impl I3Client {
     pub(crate) fn new(
         wm_name: &'static str,
         socket_variable: &str,
@@ -49,6 +48,7 @@ impl I3WorkspaceProvider {
 
         let state = Arc::new(RwLock::new(None));
         let workspace_names = Arc::new(RwLock::new(HashMap::new()));
+        let title = Arc::new(RwLock::new(read_window_title(&socket)?));
         update_ipc_state(
             wm_name,
             &socket,
@@ -61,6 +61,7 @@ impl I3WorkspaceProvider {
         let shared_state = Arc::clone(&state);
         let shared_names = Arc::clone(&workspace_names);
         let event_persistent_workspaces = persistent_workspaces.clone();
+        let event_title = Arc::clone(&title);
         let event_wm_name = wm_name;
         thread::spawn(move || {
             ipc_event_loop(
@@ -69,6 +70,7 @@ impl I3WorkspaceProvider {
                 shared_state,
                 shared_names,
                 event_persistent_workspaces,
+                event_title,
                 reconnect_interval,
             )
         });
@@ -78,11 +80,12 @@ impl I3WorkspaceProvider {
             socket,
             state,
             workspace_names,
+            title,
         })
     }
 }
 
-impl WorkspaceProvider for I3WorkspaceProvider {
+impl WmClient for I3Client {
     fn state(&self) -> Option<WorkspaceState> {
         self.state.read().ok().and_then(|state| state.clone())
     }
@@ -107,6 +110,10 @@ impl WorkspaceProvider for I3WorkspaceProvider {
             return Err(format!("{} rejected workspace {name}", self.wm_name));
         }
         Ok(())
+    }
+
+    fn title(&self) -> Option<String> {
+        self.title.read().ok().and_then(|title| title.clone())
     }
 }
 
@@ -243,24 +250,42 @@ fn ipc_event_loop(
     state: Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: Arc<RwLock<HashMap<i64, String>>>,
     persistent_workspaces: Vec<String>,
+    title: Arc<RwLock<Option<String>>>,
     reconnect_interval: Duration,
 ) {
     loop {
         match UnixStream::connect(&socket) {
             Ok(mut stream) => {
-                if ipc_write_message(&mut stream, 2, br#"["workspace","output"]"#).is_ok()
+                if ipc_write_message(&mut stream, 2, br#"["workspace","output","window"]"#).is_ok()
                     && ipc_read_message(&mut stream).is_ok()
                 {
                     loop {
                         match ipc_read_message(&mut stream) {
-                            Ok((message_type, _)) if message_type & 0x8000_0000 != 0 => {
-                                let _ = update_ipc_state(
-                                    wm_name,
-                                    &socket,
-                                    &state,
-                                    &workspace_names,
-                                    &persistent_workspaces,
-                                );
+                            Ok((message_type, _payload)) if message_type & 0x8000_0000 != 0 => {
+                                let event_type = message_type & 0x7fff_ffff;
+                                if event_type == 3 || event_type == 0 {
+                                    match read_window_title(&socket) {
+                                        Ok(value) => {
+                                            if let Ok(mut target) = title.write() {
+                                                *target = value;
+                                            }
+                                        }
+                                        Err(error) => eprintln!(
+                                            "rubar: could not read {wm_name} focused window: {error}"
+                                        ),
+                                    }
+                                } else {
+                                    // Workspace and output events refresh the state below.
+                                }
+                                if event_type == 0 || event_type == 1 {
+                                    let _ = update_ipc_state(
+                                        wm_name,
+                                        &socket,
+                                        &state,
+                                        &workspace_names,
+                                        &persistent_workspaces,
+                                    );
+                                }
                             }
                             Ok(_) => {}
                             Err(error) => {
@@ -314,56 +339,6 @@ fn ipc_read_message(stream: &mut UnixStream) -> Result<(u32, Vec<u8>), String> {
     Ok((message_type, payload))
 }
 
-pub(crate) struct WindowClient {
-    title: Arc<RwLock<Option<String>>>,
-}
-impl WindowClient {
-    pub(crate) fn new(wm: &'static str, variable: &str) -> Result<Self, String> {
-        let socket = std::env::var_os(variable)
-            .map(PathBuf::from)
-            .ok_or_else(|| format!("{variable} is not set"))?;
-        if !socket.exists() {
-            return Err(format!("{} socket does not exist", socket.display()));
-        }
-        let title = Arc::new(RwLock::new(read_window_title(&socket)?));
-        let shared = Arc::clone(&title);
-        thread::spawn(move || {
-            loop {
-                match UnixStream::connect(&socket) {
-                    Ok(mut stream) => {
-                        if ipc_write_message(&mut stream, 2, br#"["window","workspace"]"#).is_err()
-                            || ipc_read_message(&mut stream).is_err()
-                        {
-                            thread::sleep(Duration::from_secs(1));
-                            continue;
-                        }
-                        while let Ok((kind, _)) = ipc_read_message(&mut stream) {
-                            if kind & 0x8000_0000 != 0 {
-                                match read_window_title(&socket) {
-                                    Ok(value) => {
-                                        if let Ok(mut title) = shared.write() {
-                                            *title = value;
-                                        }
-                                    }
-                                    Err(error) => eprintln!(
-                                        "rubar: could not read {wm} focused window: {error}"
-                                    ),
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => thread::sleep(Duration::from_secs(1)),
-                }
-            }
-        });
-        Ok(Self { title })
-    }
-}
-impl WindowProvider for WindowClient {
-    fn title(&self) -> Option<String> {
-        self.title.read().ok().and_then(|title| title.clone())
-    }
-}
 fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
     let tree: serde_json::Value = serde_json::from_slice(&ipc_request(socket, 4, b"")?)
         .map_err(|e| format!("could not parse i3 tree: {e}"))?;

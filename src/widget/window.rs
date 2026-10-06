@@ -1,28 +1,28 @@
 use crate::config::WindowConfig;
 
 use super::{Widget, WidgetButton, WidgetContent};
-use crate::provider::wm::WindowProvider;
+use crate::provider::wm::WmClient;
 use std::sync::Arc;
 
 pub struct Window {
     format: String,
     padding: u32,
-    provider: Arc<dyn WindowProvider>,
+    client: Arc<dyn WmClient>,
 }
 
 impl Window {
-    pub fn new(config: &WindowConfig, provider: Arc<dyn WindowProvider>) -> Self {
+    pub fn new(config: &WindowConfig, client: Arc<dyn WmClient>) -> Self {
         Self {
             format: config.format.clone(),
             padding: config.padding,
-            provider,
+            client,
         }
     }
 }
 
 impl Widget for Window {
     fn content(&mut self) -> WidgetContent {
-        let title = self.provider.title().unwrap_or_default();
+        let title = self.client.title().unwrap_or_default();
         WidgetContent::Buttons(vec![WidgetButton {
             text: Some(self.format.replace("{title}", &title)),
             icon: None,

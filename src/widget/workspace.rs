@@ -1,6 +1,6 @@
 use crate::{
     config::WorkspaceConfig,
-    provider::wm::{WorkspaceProvider, WorkspaceState},
+    provider::wm::{WmClient, WorkspaceState},
 };
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ pub struct Workspace {
     all_monitors: bool,
     monitor_name: Option<String>,
     workspace_targets: Vec<WorkspaceTarget>,
-    provider: Arc<dyn WorkspaceProvider>,
+    client: Arc<dyn WmClient>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ impl From<&RenderedWorkspace> for WorkspaceTarget {
 }
 
 impl Workspace {
-    pub fn new(config: &WorkspaceConfig, provider: Arc<dyn WorkspaceProvider>) -> Self {
+    pub fn new(config: &WorkspaceConfig, client: Arc<dyn WmClient>) -> Self {
         Self {
             format: config.format.clone(),
             active_color: parse_color(&config.active_color).unwrap_or_else(|error| {
@@ -73,7 +73,7 @@ impl Workspace {
             all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_targets: Vec::new(),
-            provider,
+            client,
         }
     }
 }
@@ -84,7 +84,7 @@ impl Widget for Workspace {
     }
 
     fn content(&mut self) -> WidgetContent {
-        let Some(state) = self.provider.state() else {
+        let Some(state) = self.client.state() else {
             self.workspace_targets.clear();
             return WidgetContent::Buttons(vec![WidgetButton {
                 text: Some(self.format.replace("{workspaces}", "--")),
@@ -137,19 +137,19 @@ impl Widget for Workspace {
             return;
         }
         let target = self
-            .provider
+            .client
             .state()
             .and_then(|state| {
                 render_workspaces(&state, self.monitor_name.as_deref(), false)
                     .get(item)
-                    .map(|workspace| WorkspaceTarget::from(workspace))
+                    .map(WorkspaceTarget::from)
             })
             .or_else(|| self.workspace_targets.get(item).cloned());
         let Some(target) = target else {
             return;
         };
         if let Err(error) =
-            self.provider
+            self.client
                 .switch_to(target.id, Some(&target.monitor), target.local_index)
         {
             eprintln!(

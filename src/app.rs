@@ -1,7 +1,9 @@
 use std::error::Error;
+use std::sync::Arc;
 
 use crate::{
     config::Config,
+    provider::wm::{self, WmClient},
     render::BarRenderer,
     widget::{
         WidgetGroups, battery::Battery, clock::Clock, tray::Tray, volume::Volume, window::Window,
@@ -16,23 +18,22 @@ use shell_surface::{
 pub struct App<'a> {
     renderer: BarRenderer<'a>,
     widgets: WidgetGroups,
-    _ipc_clients: crate::provider::wm::Clients,
+    _ipc_client: Arc<dyn WmClient>,
     surfaces: Vec<SurfaceConfig>,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: &'a Config) -> Result<Self, Box<dyn Error>> {
-        let ipc_clients =
-            crate::provider::wm::Clients::connect(&config.workspace.persistent_workspaces);
+        let ipc_client = wm::connect(&config.workspace.persistent_workspaces);
         let widgets = WidgetGroups {
-            left: create_widgets(&config.modules.left, config, &ipc_clients)?,
-            center: create_widgets(&config.modules.center, config, &ipc_clients)?,
-            right: create_widgets(&config.modules.right, config, &ipc_clients)?,
+            left: create_widgets(&config.modules.left, config, &ipc_client)?,
+            center: create_widgets(&config.modules.center, config, &ipc_client)?,
+            right: create_widgets(&config.modules.right, config, &ipc_client)?,
         };
         Ok(Self {
             renderer: BarRenderer::new(&config.style),
             widgets,
-            _ipc_clients: ipc_clients,
+            _ipc_client: ipc_client,
             surfaces: vec![panel_surface_config(&config.style)],
         })
     }
@@ -136,7 +137,7 @@ fn map_mouse_button(button: SurfaceMouseButton) -> crate::widget::MouseButton {
 fn create_widgets(
     names: &[String],
     config: &Config,
-    ipc_clients: &crate::provider::wm::Clients,
+    ipc_client: &Arc<dyn WmClient>,
 ) -> Result<Vec<Box<dyn crate::widget::Widget>>, Box<dyn Error>> {
     names
         .iter()
@@ -146,12 +147,12 @@ fn create_widgets(
                 Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>)
             }
             "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
-            "workspace" => Ok(Box::new(Workspace::new(
-                &config.workspace,
-                ipc_clients.workspace.clone(),
-            )) as Box<dyn crate::widget::Widget>),
+            "workspace" => Ok(
+                Box::new(Workspace::new(&config.workspace, Arc::clone(ipc_client)))
+                    as Box<dyn crate::widget::Widget>,
+            ),
             "window" => Ok(
-                Box::new(Window::new(&config.window, ipc_clients.window.clone()))
+                Box::new(Window::new(&config.window, Arc::clone(ipc_client)))
                     as Box<dyn crate::widget::Widget>,
             ),
             "tray" => {

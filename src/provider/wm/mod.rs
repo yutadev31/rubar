@@ -22,7 +22,7 @@ pub(crate) struct Workspace {
     pub(crate) monitor: String,
 }
 
-pub(crate) trait WorkspaceProvider: Send + Sync {
+pub(crate) trait WmClient: Send + Sync {
     fn state(&self) -> Option<WorkspaceState>;
     fn switch_to(
         &self,
@@ -30,6 +30,7 @@ pub(crate) trait WorkspaceProvider: Send + Sync {
         monitor: Option<&str>,
         local_index: Option<i64>,
     ) -> Result<(), String>;
+    fn title(&self) -> Option<String>;
 }
 
 fn configured_workspace_names(values: &[i64]) -> Vec<String> {
@@ -42,68 +43,35 @@ fn configured_workspace_names(values: &[i64]) -> Vec<String> {
     unique
 }
 
-pub(crate) trait WindowProvider: Send {
-    fn title(&self) -> Option<String>;
-}
+pub(crate) fn connect(persistent_workspaces: &[i64]) -> Arc<dyn WmClient> {
+    const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
+    let persistent = configured_workspace_names(persistent_workspaces);
 
-pub(crate) struct Clients {
-    pub(crate) workspace: Arc<dyn WorkspaceProvider>,
-    pub(crate) window: Arc<dyn WindowProvider>,
-}
-
-impl Clients {
-    pub(crate) fn connect(persistent_workspaces: &[i64]) -> Self {
-        const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
-        let persistent = configured_workspace_names(persistent_workspaces);
-
-        for (name, variable) in [("Sway", "SWAYSOCK"), ("i3", "I3SOCK")] {
-            if let (Ok(workspaces), Ok(window)) = (
-                i3::I3WorkspaceProvider::new(
-                    name,
-                    variable,
-                    RECONNECT_INTERVAL,
-                    persistent.clone(),
-                ),
-                i3::WindowClient::new(name, variable),
-            ) {
-                return Self {
-                    workspace: Arc::new(workspaces),
-                    window: Arc::new(window),
-                };
-            }
+    for (name, variable) in [("Sway", "SWAYSOCK"), ("i3", "I3SOCK")] {
+        if let Ok(provider) =
+            i3::I3Client::new(name, variable, RECONNECT_INTERVAL, persistent.clone())
+        {
+            return Arc::new(provider);
         }
+    }
 
-        match (
-            hyprland::HyprlandProvider::new(RECONNECT_INTERVAL),
-            hyprland::WindowClient::new(),
-        ) {
-            (Ok(workspaces), Ok(window)) => Self {
-                workspace: Arc::new(workspaces),
-                window: Arc::new(window),
-            },
-            (Err(error), _) | (_, Err(error)) => {
-                eprintln!("rubar: could not connect to compositor IPC: {error}");
-                Self {
-                    workspace: Arc::new(UnavailableWorkspace),
-                    window: Arc::new(UnavailableWindow),
-                }
-            }
+    match hyprland::HyprlandClient::new(RECONNECT_INTERVAL) {
+        Ok(client) => Arc::new(client),
+        Err(error) => {
+            eprintln!("rubar: could not connect to compositor IPC: {error}");
+            Arc::new(UnavailableClient)
         }
     }
 }
 
-struct UnavailableWorkspace;
-impl WorkspaceProvider for UnavailableWorkspace {
+struct UnavailableClient;
+impl WmClient for UnavailableClient {
     fn state(&self) -> Option<WorkspaceState> {
         None
     }
     fn switch_to(&self, _: i64, _: Option<&str>, _: Option<i64>) -> Result<(), String> {
         Err("workspace IPC is unavailable".to_string())
     }
-}
-
-struct UnavailableWindow;
-impl WindowProvider for UnavailableWindow {
     fn title(&self) -> Option<String> {
         None
     }
