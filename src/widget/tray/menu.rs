@@ -439,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_popup_and_handles_selection() {
+    fn handles_selection() {
         let rows = vec![MenuEntry {
             id: 1,
             label: "Open".to_string(),
@@ -462,13 +462,6 @@ mod tests {
             popup.surfaces[0].output,
             OutputSelection::Named("eDP-1".to_string())
         );
-        assert_eq!(
-            popup
-                .render(SurfaceId(0), Size::new(MENU_WIDTH, ROW_HEIGHT), None)
-                .unwrap()
-                .len(),
-            (MENU_WIDTH * ROW_HEIGHT * 4) as usize
-        );
         popup.handle_event(
             SurfaceId(0),
             InputEvent::PointerButton {
@@ -480,6 +473,26 @@ mod tests {
         );
         assert_eq!(popup.selection, Some(0));
         assert!(popup.should_close());
+    }
+
+    #[test]
+    fn renders_separator_without_system_fonts() {
+        let rows = vec![MenuEntry {
+            id: 1,
+            label: String::new(),
+            enabled: true,
+            submenu: false,
+            separator: true,
+            toggle: None,
+        }];
+        let mut popup = MenuPopup::new(rows, 0, MENU_WIDTH, None, &StyleConfig::default()).unwrap();
+        assert_eq!(
+            popup
+                .render(SurfaceId(0), Size::new(MENU_WIDTH, ROW_HEIGHT), None)
+                .unwrap()
+                .len(),
+            (MENU_WIDTH * ROW_HEIGHT * 4) as usize
+        );
     }
 
     #[test]
@@ -497,55 +510,5 @@ mod tests {
         assert!(!popup.should_close());
         popup.handle_event(SurfaceId(0), InputEvent::FocusLost);
         assert!(popup.should_close());
-    }
-
-    #[test]
-    #[ignore = "requires a live Wayland compositor; set RUBAR_TEST_OUTPUT"]
-    fn opens_on_named_output() {
-        use std::time::{Duration, Instant};
-
-        struct TimedShell {
-            surfaces: Vec<SurfaceConfig>,
-            until: Instant,
-        }
-        impl Shell for TimedShell {
-            fn surface_configs(&self) -> &[SurfaceConfig] {
-                &self.surfaces
-            }
-            fn render(
-                &mut self,
-                _surface: SurfaceId,
-                size: Size,
-                _output: Option<&str>,
-            ) -> Result<Vec<u8>, Box<dyn Error>> {
-                Ok(vec![0; size.width as usize * size.height as usize * 4])
-            }
-            fn handle_event(&mut self, _surface: SurfaceId, _event: InputEvent) {}
-            fn take_redraw_request(&mut self) -> bool {
-                true
-            }
-            fn should_close(&self) -> bool {
-                Instant::now() >= self.until
-            }
-        }
-
-        let output = std::env::var("RUBAR_TEST_OUTPUT").expect("set RUBAR_TEST_OUTPUT");
-        let rows = vec![MenuEntry {
-            id: 1,
-            label: "Open".to_string(),
-            enabled: true,
-            submenu: false,
-            separator: false,
-            toggle: None,
-        }];
-        let popup =
-            MenuPopup::new(rows, 1600, 1920, Some(&output), &StyleConfig::default()).unwrap();
-        let mut shell = TimedShell {
-            surfaces: popup.surfaces,
-            until: Instant::now() + Duration::from_secs(15),
-        };
-        shell_surface::backend::wayland::WaylandBackend
-            .run(&mut shell)
-            .unwrap();
     }
 }

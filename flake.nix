@@ -27,12 +27,15 @@
           ];
         };
 
-        nativeBuildInputs = with pkgs; [
+        devTools = with pkgs; [
           rust
           taplo
           nixd
           nixfmt
           typos-lsp
+        ];
+
+        nativeBuildInputs = with pkgs; [
           pkg-config
         ];
 
@@ -41,10 +44,32 @@
           libxcb
           wayland
         ];
+
+        rubar = pkgs.rustPlatform.buildRustPackage {
+          pname = "rubar";
+          version = "0.1.0";
+          src = ./.;
+
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+
+            outputHashes = {
+              "shell-surface-0.1.0" = "sha256-QUrfvyEuGP1zTxIV6EE+gTD4cu3Y5dl5EApJmJjKx9s=";
+            };
+          };
+
+          inherit nativeBuildInputs buildInputs;
+        };
       in
       {
+        packages = {
+          inherit rubar;
+          default = rubar;
+        };
+
         devShells.default = pkgs.mkShell {
-          inherit nativeBuildInputs buildInputs;
+          nativeBuildInputs = nativeBuildInputs ++ devTools;
+          inherit buildInputs;
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
         };
       }
