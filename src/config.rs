@@ -31,10 +31,10 @@ pub struct ModulesConfig {
 #[serde(default)]
 pub struct VolumeConfig {
     pub provider: String,
-    pub out_format: String,
-    pub out_muted_format: String,
-    pub in_format: String,
-    pub in_muted_format: String,
+    pub format_out: String,
+    pub format_out_muted: String,
+    pub format_in: String,
+    pub format_in_muted: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,10 +107,10 @@ impl Default for VolumeConfig {
     fn default() -> Self {
         Self {
             provider: "pulseaudio".to_string(),
-            out_format: "{volume}% 󰕾".to_string(),
-            out_muted_format: "󰖁".to_string(),
-            in_format: "{volume}% 󰍬".to_string(),
-            in_muted_format: "󰍭".to_string(),
+            format_out: "{volume}% 󰕾".to_string(),
+            format_out_muted: "󰖁".to_string(),
+            format_in: "{volume}% 󰍬".to_string(),
+            format_in_muted: "󰍭".to_string(),
         }
     }
 }

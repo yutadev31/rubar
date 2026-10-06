@@ -6,10 +6,10 @@ pub mod provider;
 
 pub struct Volume {
     provider: Box<dyn provider::VolumeProvider>,
-    out_format: String,
-    out_muted_format: String,
-    in_format: String,
-    in_muted_format: String,
+    format_out: String,
+    format_out_muted: String,
+    format_in: String,
+    format_in_muted: String,
     state: Option<provider::VolumeState>,
 }
 
@@ -20,10 +20,10 @@ impl Volume {
         });
         Self {
             provider,
-            out_format: config.out_format.clone(),
-            out_muted_format: config.out_muted_format.clone(),
-            in_format: config.in_format.clone(),
-            in_muted_format: config.in_muted_format.clone(),
+            format_out: config.format_out.clone(),
+            format_out_muted: config.format_out_muted.clone(),
+            format_in: config.format_in.clone(),
+            format_in_muted: config.format_in_muted.clone(),
             state: None,
         }
     }
@@ -42,8 +42,8 @@ impl Widget for Volume {
         let mut buttons = Vec::new();
         if let Some(output) = state.output {
             buttons.push(volume_button(format_volume(
-                &self.out_format,
-                &self.out_muted_format,
+                &self.format_out,
+                &self.format_out_muted,
                 output.percent,
                 output.muted,
             )));
@@ -51,8 +51,8 @@ impl Widget for Volume {
 
         if let Some(input) = state.input {
             buttons.push(volume_button(format_volume(
-                &self.in_format,
-                &self.in_muted_format,
+                &self.format_in,
+                &self.format_in_muted,
                 input.percent,
                 input.muted,
             )));
