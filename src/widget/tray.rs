@@ -25,6 +25,8 @@ pub struct TrayItem {
     pub service: String,
     pub path: String,
     pub icon: Option<TrayIcon>,
+    pub attention_icon: Option<TrayIcon>,
+    pub needs_attention: bool,
 }
 type Items = Arc<Mutex<HashMap<String, TrayItem>>>;
 
@@ -57,7 +59,11 @@ impl Widget for Tray {
                 .iter()
                 .map(|item| WidgetButton {
                     text: None,
-                    icon: item.icon.clone(),
+                    icon: if item.needs_attention {
+                        item.attention_icon.clone().or_else(|| item.icon.clone())
+                    } else {
+                        item.icon.clone()
+                    },
                     padding: Some(4),
                     bold: None,
                     color: None,
@@ -140,6 +146,8 @@ impl Watcher {
             service: service.clone(),
             path: path.clone(),
             icon: None,
+            attention_icon: None,
+            needs_attention: false,
         };
         self.items
             .lock()
@@ -258,14 +266,34 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
 }
 
 fn watch_item(service: String, path: String, items: Items, sender: mpsc::Sender<Vec<TrayItem>>) {
+    if let Ok(connection) = Connection::session()
+        && let Ok(proxy) = Proxy::new(&connection, service.as_str(), path.as_str(), ITEM_INTERFACE)
+    {
+        update_icon(&proxy, &service, &items, &sender);
+    }
+    for signal in ["NewIcon", "NewAttentionIcon", "NewStatus"] {
+        let service = service.clone();
+        let path = path.clone();
+        let items = Arc::clone(&items);
+        let sender = sender.clone();
+        thread::spawn(move || watch_item_signal(service, path, items, sender, signal));
+    }
+}
+
+fn watch_item_signal(
+    service: String,
+    path: String,
+    items: Items,
+    sender: mpsc::Sender<Vec<TrayItem>>,
+    signal: &'static str,
+) {
     let Ok(connection) = Connection::session() else {
         return;
     };
     let Ok(proxy) = Proxy::new(&connection, service.as_str(), path.as_str(), ITEM_INTERFACE) else {
         return;
     };
-    update_icon(&proxy, &service, &items, &sender);
-    let Ok(mut signals) = proxy.receive_signal("NewIcon") else {
+    let Ok(mut signals) = proxy.receive_signal(signal) else {
         return;
     };
     while signals.next().is_some() {
@@ -288,12 +316,26 @@ fn update_icon(
             .ok()
             .and_then(|name| load_named_icon(&name, 16))
     });
+    let attention_pixmaps = proxy
+        .get_property::<Vec<(i32, i32, Vec<u8>)>>("AttentionIconPixmap")
+        .unwrap_or_default();
+    let attention_icon = choose_icon(&attention_pixmaps, 16).or_else(|| {
+        proxy
+            .get_property::<String>("AttentionIconName")
+            .ok()
+            .and_then(|name| load_named_icon(&name, 16))
+    });
+    let needs_attention = proxy
+        .get_property::<String>("Status")
+        .is_ok_and(|status| status == "NeedsAttention");
     if let Some(item) = items
         .lock()
         .expect("SNI item lock poisoned")
         .get_mut(service)
     {
         item.icon = icon;
+        item.attention_icon = attention_icon;
+        item.needs_attention = needs_attention;
     }
     publish_items(items, sender);
 }
