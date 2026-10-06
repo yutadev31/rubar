@@ -41,37 +41,21 @@ impl Widget for Volume {
 
         let mut buttons = Vec::new();
         if let Some(output) = state.output {
-            buttons.push(WidgetButton {
-                text: Some(format_volume(
-                    &self.out_format,
-                    &self.out_muted_format,
-                    output.percent,
-                    output.muted,
-                )),
-                icon: None,
-                padding: None,
-                bold: None,
-                color: None,
-                background: None,
-                indicator: None,
-            });
+            buttons.push(volume_button(format_volume(
+                &self.out_format,
+                &self.out_muted_format,
+                output.percent,
+                output.muted,
+            )));
         }
 
         if let Some(input) = state.input {
-            buttons.push(WidgetButton {
-                text: Some(format_volume(
-                    &self.in_format,
-                    &self.in_muted_format,
-                    input.percent,
-                    input.muted,
-                )),
-                icon: None,
-                padding: None,
-                bold: None,
-                color: None,
-                background: None,
-                indicator: None,
-            });
+            buttons.push(volume_button(format_volume(
+                &self.in_format,
+                &self.in_muted_format,
+                input.percent,
+                input.muted,
+            )));
         }
 
         WidgetContent::Buttons(buttons)
@@ -82,15 +66,9 @@ impl Widget for Volume {
             return;
         }
 
-        let mut state = match self.state {
+        let mut state = match self.current_state("mute") {
             Some(state) => state,
-            None => match self.provider.read() {
-                Ok(state) => state,
-                Err(error) => {
-                    eprintln!("rubar: could not read volume before mute: {error}");
-                    return;
-                }
-            },
+            None => return,
         };
 
         let muted = if item == 1 {
@@ -122,15 +100,9 @@ impl Widget for Volume {
     }
 
     fn on_scroll(&mut self, direction: ScrollDirection, item: usize) {
-        let mut state = match self.state {
+        let mut state = match self.current_state("scroll") {
             Some(state) => state,
-            None => match self.provider.read() {
-                Ok(state) => state,
-                Err(error) => {
-                    eprintln!("rubar: could not read volume before scroll: {error}");
-                    return;
-                }
-            },
+            None => return,
         };
 
         let change = match direction {
@@ -171,6 +143,33 @@ impl Widget for Volume {
             }
             Err(error) => eprintln!("rubar: could not set volume to {percent}%: {error}"),
         }
+    }
+}
+
+impl Volume {
+    fn current_state(&mut self, action: &str) -> Option<provider::VolumeState> {
+        match self.state {
+            Some(state) => Some(state),
+            None => match self.provider.read() {
+                Ok(state) => Some(state),
+                Err(error) => {
+                    eprintln!("rubar: could not read volume before {action}: {error}");
+                    None
+                }
+            },
+        }
+    }
+}
+
+fn volume_button(text: String) -> WidgetButton {
+    WidgetButton {
+        text: Some(text),
+        icon: None,
+        padding: None,
+        bold: None,
+        color: None,
+        background: None,
+        indicator: None,
     }
 }
 
