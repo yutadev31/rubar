@@ -1,8 +1,7 @@
 use crate::config::VolumeConfig;
+use crate::provider::audio as provider;
 
 use super::{MouseButton, ScrollDirection, Widget, WidgetButton, WidgetContent};
-
-pub mod provider;
 
 pub struct Volume {
     provider: Box<dyn provider::VolumeProvider>,
