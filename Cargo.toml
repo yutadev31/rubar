@@ -15,6 +15,7 @@ serde_json = "1"
 toml = "1.1"
 libpulse-binding = "2.30"
 tiny-skia = "0.12"
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "64394ca9d1b1506de96bb595fbbfb93462ccc290" }
 
 [dev-dependencies]

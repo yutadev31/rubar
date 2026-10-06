@@ -3,7 +3,10 @@ use std::error::Error;
 use crate::{
     config::Config,
     render::BarRenderer,
-    widget::{WidgetGroups, battery::Battery, clock::Clock, volume::Volume, workspace::Workspace},
+    widget::{
+        WidgetGroups, battery::Battery, clock::Clock, tray::Tray, volume::Volume,
+        workspace::Workspace,
+    },
 };
 use shell_surface::{
     Anchors, Backend, InputEvent, MouseButton as SurfaceMouseButton, OutputSelection, Shell, Size,
@@ -18,11 +21,10 @@ pub struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn new(config: &'a Config) -> Result<Self, Box<dyn Error>> {
-        let right = config.modules.right.clone();
         let widgets = WidgetGroups {
             left: create_widgets(&config.modules.left, config)?,
             center: create_widgets(&config.modules.center, config)?,
-            right: create_widgets(&right, config)?,
+            right: create_widgets(&config.modules.right, config)?,
         };
         Ok(Self {
             renderer: BarRenderer::new(&config.style),
@@ -53,9 +55,13 @@ impl Shell for App<'_> {
         output: Option<&str>,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
         self.widgets.set_monitor_name(output);
-        Ok(self
-            .renderer
-            .render(size.width.max(1), size.height.max(1), &mut self.widgets))
+        Ok(self.renderer.render(
+            size.width.max(1),
+            size.height.max(1),
+            &mut self.widgets.left,
+            &mut self.widgets.center,
+            &mut self.widgets.right,
+        ))
     }
 
     fn handle_event(&mut self, _surface: SurfaceId, event: InputEvent) {
@@ -67,8 +73,13 @@ impl Shell for App<'_> {
                 output,
             } => {
                 self.widgets.set_monitor_name(output.as_deref());
-                self.renderer
-                    .handle_click(position.x, map_mouse_button(button), &mut self.widgets);
+                self.renderer.handle_click(
+                    position.x,
+                    map_mouse_button(button),
+                    &mut self.widgets.left,
+                    &mut self.widgets.center,
+                    &mut self.widgets.right,
+                );
             }
             InputEvent::PointerScroll {
                 position,
@@ -84,7 +95,9 @@ impl Shell for App<'_> {
                     } else {
                         crate::widget::ScrollDirection::Down
                     },
-                    &mut self.widgets,
+                    &mut self.widgets.left,
+                    &mut self.widgets.center,
+                    &mut self.widgets.right,
                 );
             }
             _ => {}
@@ -130,6 +143,7 @@ fn create_widgets(
             "workspace" => {
                 Ok(Box::new(Workspace::new(&config.workspace)) as Box<dyn crate::widget::Widget>)
             }
+            "tray" => Ok(Box::new(Tray::new()) as Box<dyn crate::widget::Widget>),
             _ => Err(format!("unknown module `{name}`").into()),
         })
         .collect()
