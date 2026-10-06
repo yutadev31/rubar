@@ -127,7 +127,8 @@ fn send_event(proxy: &Proxy<'_>, id: i32, kind: &str) -> Result<(), Box<dyn Erro
 }
 
 fn load_rows(proxy: &Proxy<'_>, parent: i32) -> Result<Vec<MenuEntry>, Box<dyn Error>> {
-    let _: bool = proxy.call("AboutToShow", &(parent,))?;
+    // TODO エラーをちゃんと処理する
+    let _: Result<bool, zbus::Error> = proxy.call("AboutToShow", &(parent,));
     let (_revision, (_id, _properties, children)): MenuLayout =
         proxy.call("GetLayout", &(parent, 1_i32, Vec::<String>::new()))?;
     let mut rows = Vec::new();
