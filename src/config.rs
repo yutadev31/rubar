@@ -118,7 +118,7 @@ impl Default for VolumeConfig {
 impl Default for BatteryConfig {
     fn default() -> Self {
         Self {
-            provider: "sysfs".to_string(),
+            provider: "auto".to_string(),
             format: "{percent}% 󰁹".to_string(),
             refresh_seconds: 30,
         }

@@ -38,6 +38,11 @@ pub trait BatteryProvider {
 
 pub fn create(name: &str) -> Result<Box<dyn BatteryProvider>, String> {
     match name {
+        "auto" => {
+            let provider = Sysfs::new("/sys/class/power_supply");
+            provider.read()?;
+            Ok(Box::new(provider))
+        }
         "sysfs" | "linux" => Ok(Box::new(Sysfs::new("/sys/class/power_supply"))),
         _ => Err(format!("unknown battery provider `{name}`")),
     }
