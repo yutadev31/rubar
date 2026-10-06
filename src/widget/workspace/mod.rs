@@ -8,7 +8,8 @@ use provider::{WorkspaceProvider, WorkspaceState};
 pub struct Workspace {
     format: String,
     active_color: [u8; 4],
-    active_background_color: [u8; 4],
+    active_indicator_height: u32,
+    active_indicator_at_top: bool,
     padding: u32,
     spacing: u32,
     all_monitors: bool,
@@ -45,15 +46,17 @@ impl Workspace {
                 );
                 [0, 128, 255, 255]
             }),
-            active_background_color: parse_color(&config.active_background_color).unwrap_or_else(
-                |error| {
+            active_indicator_height: config.active_indicator_height,
+            active_indicator_at_top: match config.active_indicator_position.as_str() {
+                "top" => true,
+                "bottom" => false,
+                value => {
                     eprintln!(
-                        "rubar: invalid workspace active_background_color `{}`: {error}; using #414868",
-                        config.active_background_color
+                        "rubar: invalid workspace active_indicator_position `{value}`; using bottom"
                     );
-                    [65, 72, 104, 255]
-                },
-            ),
+                    false
+                }
+            },
             padding: config.padding,
             spacing: config.spacing,
             all_monitors: config.all_monitors,
@@ -79,6 +82,7 @@ impl Widget for Workspace {
                 bold: Some(false),
                 color: None,
                 background: None,
+                indicator: None,
             }]);
         };
 
@@ -104,15 +108,17 @@ impl Widget for Workspace {
                     icon: None,
                     padding: Some(self.padding),
                     bold: Some(workspace.active),
-                    // Only the active workspace on the active monitor uses the
-                    // configured accent color. Other monitors keep the bar's
-                    // normal text color, even when their workspace is active.
-                    color: if workspace.active_on_monitor {
+                    color: if workspace.active {
                         Some(self.active_color)
                     } else {
                         None
                     },
-                    background: workspace.active.then_some(self.active_background_color),
+                    background: None,
+                    indicator: workspace.active_on_monitor.then_some((
+                        self.active_color,
+                        self.active_indicator_height,
+                        self.active_indicator_at_top,
+                    )),
                 })
                 .collect(),
         )

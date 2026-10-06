@@ -53,6 +53,7 @@ impl Widget for Volume {
                 bold: None,
                 color: None,
                 background: None,
+                indicator: None,
             });
         }
 
@@ -69,6 +70,7 @@ impl Widget for Volume {
                 bold: None,
                 color: None,
                 background: None,
+                indicator: None,
             });
         }
 

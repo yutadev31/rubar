@@ -91,6 +91,7 @@ impl Widget for Tray {
                     bold: None,
                     color: None,
                     background: None,
+                    indicator: None,
                 })
                 .collect(),
         )

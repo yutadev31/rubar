@@ -42,6 +42,7 @@ pub struct RenderButton {
     pub bold: Option<bool>,
     pub color: Option<[u8; 4]>,
     pub background: Option<[u8; 4]>,
+    pub indicator: Option<([u8; 4], u32, bool)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +178,7 @@ impl<'a> BarRenderer<'a> {
                     bold: None,
                     color: None,
                     background: None,
+                    indicator: None,
                 }],
                 RenderContent::Buttons(buttons) => buttons,
             };
@@ -244,6 +246,13 @@ impl<'a> BarRenderer<'a> {
                         metrics.height,
                         button.background,
                     );
+                    self.draw_button_indicator(
+                        pixmap,
+                        cursor - button_width,
+                        cursor,
+                        metrics.height,
+                        button.indicator,
+                    );
                     self.hitboxes.push(Hitbox::new(
                         cursor - button_width,
                         cursor,
@@ -274,6 +283,13 @@ impl<'a> BarRenderer<'a> {
                         cursor + button_width,
                         metrics.height,
                         button.background,
+                    );
+                    self.draw_button_indicator(
+                        pixmap,
+                        cursor,
+                        cursor + button_width,
+                        metrics.height,
+                        button.indicator,
                     );
                     self.hitboxes.push(Hitbox::new(
                         cursor,
@@ -329,6 +345,39 @@ impl<'a> BarRenderer<'a> {
 
         let rect = Rect::from_xywh(left, 0.0, width, height as f32)
             .expect("valid button background rectangle");
+        pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+    }
+
+    fn draw_button_indicator(
+        &self,
+        pixmap: &mut Pixmap,
+        left: i32,
+        right: i32,
+        height: u32,
+        indicator: Option<([u8; 4], u32, bool)>,
+    ) {
+        let Some(([r, g, b, a], indicator_height, at_top)) = indicator else {
+            return;
+        };
+        let indicator_height = indicator_height.min(height);
+        if right <= left || indicator_height == 0 || height == 0 {
+            return;
+        }
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(r, g, b, a);
+        let left = left.max(0) as f32;
+        let right = right.min(pixmap.width() as i32) as f32;
+        let width = right - left;
+        if width <= 0.0 {
+            return;
+        }
+        let y = if at_top {
+            0.0
+        } else {
+            (height - indicator_height) as f32
+        };
+        let rect = Rect::from_xywh(left, y, width, indicator_height as f32)
+            .expect("valid button indicator rectangle");
         pixmap.fill_rect(rect, &paint, Transform::identity(), None);
     }
 
