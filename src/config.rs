@@ -58,7 +58,7 @@ pub struct WorkspaceConfig {
     pub persistent_workspaces: Vec<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct StyleConfig {
     pub colors: ColorsConfig,
@@ -71,7 +71,7 @@ pub struct StyleConfig {
     pub button_padding: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct ColorsConfig {
     pub bg: String,

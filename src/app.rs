@@ -76,6 +76,7 @@ impl Shell for App<'_> {
                 self.renderer.handle_click(
                     position.x,
                     map_mouse_button(button),
+                    output.as_deref(),
                     &mut self.widgets.left,
                     &mut self.widgets.center,
                     &mut self.widgets.right,
@@ -143,7 +144,9 @@ fn create_widgets(
             "workspace" => {
                 Ok(Box::new(Workspace::new(&config.workspace)) as Box<dyn crate::widget::Widget>)
             }
-            "tray" => Ok(Box::new(Tray::new()) as Box<dyn crate::widget::Widget>),
+            "tray" => {
+                Ok(Box::new(Tray::new(config.style.clone())) as Box<dyn crate::widget::Widget>)
+            }
             _ => Err(format!("unknown module `{name}`").into()),
         })
         .collect()

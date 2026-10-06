@@ -21,6 +21,13 @@ pub enum ScrollDirection {
     Down,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ClickContext<'a> {
+    pub button_left: i32,
+    pub surface_width: u32,
+    pub output: Option<&'a str>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum RenderContent {
     Text(String),
@@ -51,6 +58,9 @@ pub trait RenderWidget {
     }
     fn set_monitor_name(&mut self, _monitor_name: Option<&str>) {}
     fn on_click(&mut self, _button: MouseButton, _item: usize) {}
+    fn on_click_at(&mut self, button: MouseButton, item: usize, _context: ClickContext<'_>) {
+        self.on_click(button, item);
+    }
     fn on_scroll(&mut self, _direction: ScrollDirection, _item: usize) {}
 }
 
@@ -123,12 +133,13 @@ impl<'a> BarRenderer<'a> {
         &self,
         x: f64,
         button: MouseButton,
+        output: Option<&str>,
         left: &mut [Box<dyn RenderWidget>],
         center: &mut [Box<dyn RenderWidget>],
         right: &mut [Box<dyn RenderWidget>],
     ) {
         if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
-            hitbox.dispatch_click(button, left, center, right);
+            hitbox.dispatch_click(button, output, left, center, right);
         }
     }
 
@@ -236,6 +247,7 @@ impl<'a> BarRenderer<'a> {
                     self.hitboxes.push(Hitbox::new(
                         cursor - button_width,
                         cursor,
+                        metrics.width,
                         alignment,
                         index,
                         button_index,
@@ -266,6 +278,7 @@ impl<'a> BarRenderer<'a> {
                     self.hitboxes.push(Hitbox::new(
                         cursor,
                         cursor + button_width,
+                        metrics.width,
                         alignment,
                         index,
                         button_index,
@@ -481,16 +494,25 @@ enum Alignment {
 struct Hitbox {
     left: i32,
     right: i32,
+    surface_width: u32,
     alignment: Alignment,
     index: usize,
     item: usize,
 }
 
 impl Hitbox {
-    fn new(left: i32, right: i32, alignment: Alignment, index: usize, item: usize) -> Self {
+    fn new(
+        left: i32,
+        right: i32,
+        surface_width: u32,
+        alignment: Alignment,
+        index: usize,
+        item: usize,
+    ) -> Self {
         Self {
             left,
             right,
+            surface_width,
             alignment,
             index,
             item,
@@ -504,14 +526,20 @@ impl Hitbox {
     fn dispatch_click(
         &self,
         button: MouseButton,
+        output: Option<&str>,
         left: &mut [Box<dyn RenderWidget>],
         center: &mut [Box<dyn RenderWidget>],
         right: &mut [Box<dyn RenderWidget>],
     ) {
+        let context = ClickContext {
+            button_left: self.left,
+            surface_width: self.surface_width,
+            output,
+        };
         match self.alignment {
-            Alignment::Left => left[self.index].on_click(button, self.item),
-            Alignment::Center => center[self.index].on_click(button, self.item),
-            Alignment::Right => right[self.index].on_click(button, self.item),
+            Alignment::Left => left[self.index].on_click_at(button, self.item, context),
+            Alignment::Center => center[self.index].on_click_at(button, self.item, context),
+            Alignment::Right => right[self.index].on_click_at(button, self.item, context),
         }
     }
 
@@ -535,7 +563,7 @@ fn parse_color(value: &str) -> Result<Color, Box<dyn Error>> {
     Ok(Color::from_rgba8(r, g, b, a))
 }
 
-fn parse_rgba(value: &str) -> Result<[u8; 4], Box<dyn Error>> {
+pub(crate) fn parse_rgba(value: &str) -> Result<[u8; 4], Box<dyn Error>> {
     let hex = value.strip_prefix('#').unwrap_or(value);
     let (rgb, alpha) = match hex.len() {
         6 => (hex, 255),

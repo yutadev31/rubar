@@ -17,8 +17,11 @@ libpulse-binding = "2.30"
 tiny-skia = "0.12"
 png = "0.18"
 resvg = "0.48.1"
-zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
-shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "64394ca9d1b1506de96bb595fbbfb93462ccc290" }
+zbus = { version = "5", default-features = false, features = [
+  "async-io",
+  "blocking-api",
+] }
+shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "f1c92ce1d201699ccd5627bcaecef28fbeb0787a" }
 
 [dev-dependencies]
 tempfile = "3"

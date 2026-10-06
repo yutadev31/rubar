@@ -3,7 +3,11 @@ use std::{
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
 };
 
@@ -15,7 +19,13 @@ use zbus::{
     proxy::CacheProperties,
 };
 
-use crate::widget::{MouseButton, TrayIcon, Widget, WidgetButton, WidgetContent};
+use crate::{
+    config::StyleConfig,
+    render::ClickContext,
+    widget::{MouseButton, TrayIcon, Widget, WidgetButton, WidgetContent},
+};
+
+mod menu;
 
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const WATCHER_INTERFACE: &str = "org.kde.StatusNotifierWatcher";
@@ -34,10 +44,20 @@ type Items = Arc<Mutex<HashMap<String, TrayItem>>>;
 pub struct Tray {
     receiver: mpsc::Receiver<Vec<TrayItem>>,
     items: Vec<TrayItem>,
+    style: StyleConfig,
+    menu_open: Arc<AtomicBool>,
+}
+
+struct MenuOpenGuard(Arc<AtomicBool>);
+
+impl Drop for MenuOpenGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 impl Tray {
-    pub fn new() -> Self {
+    pub fn new(style: StyleConfig) -> Self {
         let (sender, receiver) = mpsc::channel();
         thread::Builder::new()
             .name("rubar-sni".to_string())
@@ -46,6 +66,8 @@ impl Tray {
         Self {
             receiver,
             items: Vec::new(),
+            style,
+            menu_open: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -98,6 +120,31 @@ impl Widget for Tray {
             })();
             if let Err(error) = result {
                 eprintln!("rubar: could not call tray item {method}: {error}");
+            }
+        });
+    }
+
+    fn on_click_at(&mut self, button: MouseButton, index: usize, context: ClickContext<'_>) {
+        if button != MouseButton::Right {
+            self.on_click(button, index);
+            return;
+        }
+        let Some(item) = self.items.get(index).cloned() else {
+            return;
+        };
+        if self.menu_open.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let style = self.style.clone();
+        let button_left = context.button_left;
+        let surface_width = context.surface_width;
+        let output = context.output.map(str::to_string);
+        let menu_open = Arc::clone(&self.menu_open);
+        thread::spawn(move || {
+            let _guard = MenuOpenGuard(menu_open);
+            let identity = format!("{}{}", item.service, item.path);
+            if let Err(error) = menu::open(item, button_left, surface_width, output, &style) {
+                eprintln!("rubar: could not open tray menu {identity}: {error}");
             }
         });
     }
@@ -204,10 +251,13 @@ impl Watcher {
 }
 
 fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
-    let Ok(connection) = Connection::session() else {
+    let Ok(connection) =
+        Connection::session().inspect_err(|error| eprintln!("rubar: tray session bus: {error}"))
+    else {
         return;
     };
-    if connection.request_name(WATCHER_INTERFACE).is_err() {
+    if let Err(error) = connection.request_name(WATCHER_INTERFACE) {
+        eprintln!("rubar: could not own tray watcher name: {error}");
         return;
     }
     let items = Arc::new(Mutex::new(HashMap::new()));
@@ -215,11 +265,8 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
         items: Arc::clone(&items),
         sender: sender.clone(),
     };
-    if connection
-        .object_server()
-        .at(WATCHER_PATH, watcher)
-        .is_err()
-    {
+    if let Err(error) = connection.object_server().at(WATCHER_PATH, watcher) {
+        eprintln!("rubar: could not register tray watcher: {error}");
         return;
     }
     let Ok(watcher_ref) = connection
