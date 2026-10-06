@@ -1,5 +1,8 @@
 use std::{
     collections::HashMap,
+    fs::File,
+    io::BufReader,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     thread,
 };
@@ -279,7 +282,12 @@ fn update_icon(
     let pixmaps = proxy
         .get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap")
         .unwrap_or_default();
-    let icon = choose_icon(&pixmaps, 16);
+    let icon = choose_icon(&pixmaps, 16).or_else(|| {
+        proxy
+            .get_property::<String>("IconName")
+            .ok()
+            .and_then(|name| load_named_icon(&name, 16))
+    });
     if let Some(item) = items
         .lock()
         .expect("SNI item lock poisoned")
@@ -324,6 +332,87 @@ fn choose_icon(pixmaps: &[(i32, i32, Vec<u8>)], target: i32) -> Option<TrayIcon>
     Some(TrayIcon {
         width: *width as u32,
         height: *height as u32,
+        pixels,
+    })
+}
+
+fn load_named_icon(name: &str, target: u32) -> Option<TrayIcon> {
+    if name.is_empty() || Path::new(name).components().count() != 1 {
+        return None;
+    }
+    let mut roots = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .into_iter()
+        .map(|path| path.join("icons"))
+        .collect::<Vec<_>>();
+    let data_dirs = std::env::var_os("XDG_DATA_DIRS")
+        .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            vec![
+                PathBuf::from("/usr/local/share"),
+                PathBuf::from("/usr/share"),
+            ]
+        });
+    for dir in data_dirs {
+        roots.push(dir.join("icons"));
+        roots.push(dir.join("pixmaps"));
+    }
+    let sizes = [
+        target.to_string(),
+        "16x16".into(),
+        "22x22".into(),
+        "24x24".into(),
+        "32x32".into(),
+        "scalable".into(),
+    ];
+    let contexts = ["apps", "status", "actions", "devices", "places"];
+    let mut candidates = Vec::new();
+    for root in roots {
+        for theme in ["hicolor", "Adwaita", "Papirus", "breeze"] {
+            for size in &sizes {
+                for context in contexts {
+                    candidates.push(
+                        root.join(theme)
+                            .join(size)
+                            .join(context)
+                            .join(format!("{name}.png")),
+                    );
+                }
+            }
+        }
+        candidates.push(root.join(format!("{name}.png")));
+    }
+    candidates.into_iter().find_map(|path| load_png_icon(&path))
+}
+
+fn load_png_icon(path: &Path) -> Option<TrayIcon> {
+    let decoder = png::Decoder::new(BufReader::new(File::open(path).ok()?));
+    let mut reader = decoder.read_info().ok()?;
+    let mut bytes = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut bytes).ok()?;
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => bytes[..info.buffer_size()].to_vec(),
+        png::ColorType::Rgb => bytes[..info.buffer_size()]
+            .chunks_exact(3)
+            .flat_map(|px| [px[0], px[1], px[2], 255])
+            .collect(),
+        _ => return None,
+    };
+    let pixels = rgba
+        .chunks_exact(4)
+        .flat_map(|px| {
+            let alpha = px[3] as u16;
+            [
+                ((px[0] as u16 * alpha) / 255) as u8,
+                ((px[1] as u16 * alpha) / 255) as u8,
+                ((px[2] as u16 * alpha) / 255) as u8,
+                px[3],
+            ]
+        })
+        .collect();
+    Some(TrayIcon {
+        width: info.width,
+        height: info.height,
         pixels,
     })
 }

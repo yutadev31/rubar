@@ -924,6 +924,7 @@ dependencies = [
  "cosmic-text",
  "dirs",
  "libpulse-binding",
+ "png",
  "serde",
  "serde_json",
  "shell-surface",
