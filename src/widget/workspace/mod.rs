@@ -35,6 +35,16 @@ struct RenderedWorkspace {
     active_on_monitor: bool,
 }
 
+impl From<&RenderedWorkspace> for WorkspaceTarget {
+    fn from(workspace: &RenderedWorkspace) -> Self {
+        Self {
+            id: workspace.id,
+            monitor: workspace.monitor.clone(),
+            local_index: workspace.local_index,
+        }
+    }
+}
+
 impl Workspace {
     pub fn new(config: &WorkspaceConfig) -> Self {
         Self {
@@ -88,14 +98,7 @@ impl Widget for Workspace {
 
         let active_id = state.active_id.to_string();
         let workspaces = render_workspaces(&state, self.monitor_name.as_deref(), self.all_monitors);
-        self.workspace_targets = workspaces
-            .iter()
-            .map(|workspace| WorkspaceTarget {
-                id: workspace.id,
-                monitor: workspace.monitor.clone(),
-                local_index: workspace.local_index,
-            })
-            .collect();
+        self.workspace_targets = workspaces.iter().map(WorkspaceTarget::from).collect();
         WidgetContent::Buttons(
             workspaces
                 .into_iter()
@@ -138,11 +141,7 @@ impl Widget for Workspace {
             .and_then(|state| {
                 render_workspaces(&state, self.monitor_name.as_deref(), false)
                     .get(item)
-                    .map(|workspace| WorkspaceTarget {
-                        id: workspace.id,
-                        monitor: workspace.monitor.clone(),
-                        local_index: workspace.local_index,
-                    })
+                    .map(|workspace| WorkspaceTarget::from(workspace))
             })
             .or_else(|| self.workspace_targets.get(item).cloned());
         let Some(target) = target else {
@@ -206,7 +205,8 @@ fn render_workspaces(
         .map(|workspace| {
             let index = monitor_indices.entry(workspace.monitor_id).or_insert(0);
             *index += 1;
-            let text = if workspace.name.parse::<i64>().is_ok() {
+            let local_index = workspace.name.parse::<i64>().ok().map(|_| *index);
+            let text = if local_index.is_some() {
                 index.to_string()
             } else {
                 workspace.name.clone()
@@ -214,7 +214,7 @@ fn render_workspaces(
             RenderedWorkspace {
                 id: workspace.id,
                 monitor: workspace.monitor.clone(),
-                local_index: workspace.name.parse::<i64>().ok().map(|_| *index),
+                local_index,
                 text,
                 active: workspace.id == active_id,
                 active_on_monitor: workspace.id == globally_active_id,
