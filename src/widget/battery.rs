@@ -1,10 +1,9 @@
 use std::time::{Duration, Instant};
 
 use crate::config::BatteryConfig;
+use crate::provider::battery as provider;
 
 use super::{Widget, WidgetContent};
-
-pub mod provider;
 
 pub struct Battery {
     provider: Box<dyn provider::BatteryProvider>,
