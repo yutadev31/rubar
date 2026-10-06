@@ -38,7 +38,7 @@ impl Widget for Battery {
             self.last_refresh = Some(Instant::now());
         }
         let Some(state) = self.state else {
-            return WidgetContent::Text("󰁹 --".to_string());
+            return WidgetContent::Buttons(Vec::new());
         };
         let charging = state.status.is_charging();
         WidgetContent::Text(
