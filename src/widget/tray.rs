@@ -8,10 +8,11 @@ use std::{
 };
 
 use zbus::{
-    blocking::{Connection, Proxy},
+    blocking::{Connection, Proxy, proxy::Builder},
     interface,
     message::Header,
     object_server::SignalEmitter,
+    proxy::CacheProperties,
 };
 
 use crate::widget::{MouseButton, TrayIcon, Widget, WidgetButton, WidgetContent};
@@ -267,7 +268,7 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
 
 fn watch_item(service: String, path: String, items: Items, sender: mpsc::Sender<Vec<TrayItem>>) {
     if let Ok(connection) = Connection::session()
-        && let Ok(proxy) = Proxy::new(&connection, service.as_str(), path.as_str(), ITEM_INTERFACE)
+        && let Ok(proxy) = item_proxy(&connection, &service, &path)
     {
         update_icon(&proxy, &service, &items, &sender);
     }
@@ -290,7 +291,7 @@ fn watch_item_signal(
     let Ok(connection) = Connection::session() else {
         return;
     };
-    let Ok(proxy) = Proxy::new(&connection, service.as_str(), path.as_str(), ITEM_INTERFACE) else {
+    let Ok(proxy) = item_proxy(&connection, &service, &path) else {
         return;
     };
     let Ok(mut signals) = proxy.receive_signal(signal) else {
@@ -301,30 +302,46 @@ fn watch_item_signal(
     }
 }
 
+fn item_proxy<'a>(
+    connection: &Connection,
+    service: &'a str,
+    path: &'a str,
+) -> zbus::Result<Proxy<'a>> {
+    Builder::<Proxy<'a>>::new(connection)
+        .destination(service)?
+        .path(path)?
+        .interface(ITEM_INTERFACE)?
+        // SNI's NewIcon signal does not update the D-Bus properties cache.
+        .cache_properties(CacheProperties::No)
+        .build()
+}
+
 fn update_icon(
     proxy: &Proxy<'_>,
     service: &str,
     items: &Items,
     sender: &mpsc::Sender<Vec<TrayItem>>,
 ) {
-    let pixmaps = proxy
-        .get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap")
-        .unwrap_or_default();
-    let icon = choose_icon(&pixmaps, 16).or_else(|| {
-        proxy
-            .get_property::<String>("IconName")
-            .ok()
-            .and_then(|name| load_named_icon(&name, 16))
-    });
-    let attention_pixmaps = proxy
-        .get_property::<Vec<(i32, i32, Vec<u8>)>>("AttentionIconPixmap")
-        .unwrap_or_default();
-    let attention_icon = choose_icon(&attention_pixmaps, 16).or_else(|| {
-        proxy
-            .get_property::<String>("AttentionIconName")
-            .ok()
-            .and_then(|name| load_named_icon(&name, 16))
-    });
+    let icon = proxy
+        .get_property::<String>("IconName")
+        .ok()
+        .and_then(|name| load_named_icon(&name, 16))
+        .or_else(|| {
+            let pixmaps = proxy
+                .get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap")
+                .unwrap_or_default();
+            choose_icon(&pixmaps, 16)
+        });
+    let attention_icon = proxy
+        .get_property::<String>("AttentionIconName")
+        .ok()
+        .and_then(|name| load_named_icon(&name, 16))
+        .or_else(|| {
+            let pixmaps = proxy
+                .get_property::<Vec<(i32, i32, Vec<u8>)>>("AttentionIconPixmap")
+                .unwrap_or_default();
+            choose_icon(&pixmaps, 16)
+        });
     let needs_attention = proxy
         .get_property::<String>("Status")
         .is_ok_and(|status| status == "NeedsAttention");
@@ -399,6 +416,10 @@ fn load_named_icon(name: &str, target: u32) -> Option<TrayIcon> {
         roots.push(dir.join("icons"));
         roots.push(dir.join("pixmaps"));
     }
+    load_named_icon_in_roots(name, target, roots)
+}
+
+fn load_named_icon_in_roots(name: &str, target: u32, roots: Vec<PathBuf>) -> Option<TrayIcon> {
     let sizes = [
         target.to_string(),
         "16x16".into(),
@@ -408,23 +429,53 @@ fn load_named_icon(name: &str, target: u32) -> Option<TrayIcon> {
         "scalable".into(),
     ];
     let contexts = ["apps", "status", "actions", "devices", "places"];
-    let mut candidates = Vec::new();
+    let files = [format!("{name}.png"), format!("{name}.svg")];
     for root in roots {
         for theme in ["hicolor", "Adwaita", "Papirus", "breeze"] {
             for size in &sizes {
                 for context in contexts {
-                    candidates.push(
-                        root.join(theme)
-                            .join(size)
-                            .join(context)
-                            .join(format!("{name}.png")),
-                    );
+                    let directory = root.join(theme).join(size).join(context);
+                    for file in &files {
+                        if let Some(icon) = load_icon_file(&directory.join(file), target) {
+                            return Some(icon);
+                        }
+                    }
                 }
             }
         }
-        candidates.push(root.join(format!("{name}.png")));
+        for file in &files {
+            if let Some(icon) = load_icon_file(&root.join(file), target) {
+                return Some(icon);
+            }
+        }
     }
-    candidates.into_iter().find_map(|path| load_png_icon(&path))
+    None
+}
+
+fn load_icon_file(path: &Path, target: u32) -> Option<TrayIcon> {
+    if path.extension().is_some_and(|extension| extension == "svg") {
+        load_svg_icon(path, target)
+    } else {
+        load_png_icon(path)
+    }
+}
+
+fn load_svg_icon(path: &Path, target: u32) -> Option<TrayIcon> {
+    let data = std::fs::read(path).ok()?;
+    let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(target, target)?;
+    let size = tree.size();
+    let scale = (target as f32 / size.width()).min(target as f32 / size.height());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    Some(TrayIcon {
+        width: target,
+        height: target,
+        pixels: pixmap.data().to_vec(),
+    })
 }
 
 fn load_png_icon(path: &Path) -> Option<TrayIcon> {
@@ -461,7 +512,7 @@ fn load_png_icon(path: &Path) -> Option<TrayIcon> {
 
 #[cfg(test)]
 mod tests {
-    use super::choose_icon;
+    use super::{choose_icon, load_named_icon_in_roots, load_svg_icon};
 
     #[test]
     fn rejects_empty_and_malformed_pixmaps() {
@@ -483,5 +534,42 @@ mod tests {
         .expect("valid icon");
         assert_eq!((icon.width, icon.height), (16, 16));
         assert_eq!(icon.pixels[..4], [128, 32, 16, 128]);
+    }
+
+    #[test]
+    fn renders_svg_icon_as_premultiplied_rgba() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("icon.svg");
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#ff0000" fill-opacity="0.5"/></svg>"##,
+        )
+        .expect("SVG fixture");
+
+        let icon = load_svg_icon(&path, 16).expect("rendered icon");
+        assert_eq!((icon.width, icon.height), (16, 16));
+        assert_eq!(icon.pixels.len(), 16 * 16 * 4);
+        assert_eq!(icon.pixels[..4], [128, 0, 0, 128]);
+    }
+
+    #[test]
+    fn finds_svg_icon_in_hicolor_theme() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let icon_dir = directory.path().join("hicolor/scalable/apps");
+        std::fs::create_dir_all(&icon_dir).expect("icon directory");
+        std::fs::write(
+            icon_dir.join("fcitx_mozc_hiragana.svg"),
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#ff0000"/></svg>"##,
+        )
+        .expect("SVG fixture");
+
+        let icon = load_named_icon_in_roots(
+            "fcitx_mozc_hiragana",
+            16,
+            vec![directory.path().to_path_buf()],
+        )
+        .expect("named SVG icon");
+        assert_eq!((icon.width, icon.height), (16, 16));
+        assert_eq!(icon.pixels[..4], [255, 0, 0, 255]);
     }
 }
