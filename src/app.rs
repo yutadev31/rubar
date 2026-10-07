@@ -155,9 +155,10 @@ fn create_widgets(
                 Box::new(Window::new(&config.window, Arc::clone(ipc_client)))
                     as Box<dyn crate::widget::Widget>,
             ),
-            "tray" => {
-                Ok(Box::new(Tray::new(config.style.clone())) as Box<dyn crate::widget::Widget>)
-            }
+            "tray" => Ok(
+                Box::new(Tray::new(config.tray.icon_size, config.style.clone()))
+                    as Box<dyn crate::widget::Widget>,
+            ),
             _ => Err(format!("unknown module `{name}`").into()),
         })
         .collect()

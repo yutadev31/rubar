@@ -11,7 +11,20 @@ pub struct Config {
     pub volume: VolumeConfig,
     pub workspace: WorkspaceConfig,
     pub window: WindowConfig,
+    pub tray: TrayConfig,
     pub style: StyleConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TrayConfig {
+    pub icon_size: u32,
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self { icon_size: 16 }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -45,6 +45,7 @@ pub struct Tray {
     receiver: mpsc::Receiver<Vec<TrayItem>>,
     items: Vec<TrayItem>,
     style: StyleConfig,
+    icon_size: u32,
     menu_open: Arc<AtomicBool>,
 }
 
@@ -57,7 +58,7 @@ impl Drop for MenuOpenGuard {
 }
 
 impl Tray {
-    pub fn new(style: StyleConfig) -> Self {
+    pub fn new(icon_size: u32, style: StyleConfig) -> Self {
         let (sender, receiver) = mpsc::channel();
         thread::Builder::new()
             .name("rubar-sni".to_string())
@@ -67,6 +68,7 @@ impl Tray {
             receiver,
             items: Vec::new(),
             style,
+            icon_size: icon_size.max(1),
             menu_open: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -80,18 +82,22 @@ impl Widget for Tray {
         WidgetContent::Buttons(
             self.items
                 .iter()
-                .map(|item| WidgetButton {
-                    text: None,
-                    icon: if item.needs_attention {
+                .map(|item| {
+                    let icon = if item.needs_attention {
                         item.attention_icon.clone().or_else(|| item.icon.clone())
                     } else {
                         item.icon.clone()
-                    },
-                    padding: Some(4),
-                    bold: None,
-                    color: None,
-                    background: None,
-                    indicator: None,
+                    }
+                    .map(|icon| resize_icon(icon, self.icon_size));
+                    WidgetButton {
+                        text: None,
+                        icon,
+                        padding: Some(4),
+                        bold: None,
+                        color: None,
+                        background: None,
+                        indicator: None,
+                    }
                 })
                 .collect(),
         )
@@ -148,6 +154,35 @@ impl Widget for Tray {
                 eprintln!("rubar: could not open tray menu {identity}: {error}");
             }
         });
+    }
+}
+
+fn resize_icon(icon: TrayIcon, size: u32) -> TrayIcon {
+    if icon.width == 0 || icon.height == 0 || size == 0 {
+        return icon;
+    }
+    let scale = (size as f64 / icon.width as f64).min(size as f64 / icon.height as f64);
+    let width = ((icon.width as f64 * scale).round() as u32).clamp(1, size);
+    let height = ((icon.height as f64 * scale).round() as u32).clamp(1, size);
+    let mut pixels = vec![0; size as usize * size as usize * 4];
+    let left = (size - width) / 2;
+    let top = (size - height) / 2;
+    for y in 0..height {
+        for x in 0..width {
+            let source_x = (x as u64 * icon.width as u64 / width as u64) as usize;
+            let source_y = (y as u64 * icon.height as u64 / height as u64) as usize;
+            let source = (source_y * icon.width as usize + source_x) * 4;
+            let destination = (((top + y) as usize * size as usize) + (left + x) as usize) * 4;
+            if source + 4 <= icon.pixels.len() {
+                pixels[destination..destination + 4]
+                    .copy_from_slice(&icon.pixels[source..source + 4]);
+            }
+        }
+    }
+    TrayIcon {
+        width: size,
+        height: size,
+        pixels,
     }
 }
 
