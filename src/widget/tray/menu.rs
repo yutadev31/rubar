@@ -1,4 +1,8 @@
-use std::{collections::HashMap, error::Error};
+use std::{
+    collections::HashMap,
+    error::Error,
+    time::{Duration, Instant},
+};
 
 use cosmic_text::{
     Attrs, Buffer, Color as TextColor, FontSystem, Metrics, Shaping, SwashCache, Wrap,
@@ -20,6 +24,7 @@ use super::{ITEM_INTERFACE, TrayItem};
 const MENU_INTERFACE: &str = "com.canonical.dbusmenu";
 const ROW_HEIGHT: u32 = 30;
 const MENU_WIDTH: u32 = 320;
+const POINTER_LEAVE_GRACE: Duration = Duration::from_millis(700);
 type MenuLayout = (u32, (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>));
 
 struct MenuEntry {
@@ -196,6 +201,7 @@ struct MenuPopup {
     rows: Vec<MenuEntry>,
     selection: Option<usize>,
     closed: bool,
+    pointer_leave_deadline: Option<Instant>,
     hovered: Option<usize>,
     redraw: bool,
     background: [u8; 4],
@@ -239,6 +245,7 @@ impl MenuPopup {
             rows,
             selection: None,
             closed: false,
+            pointer_leave_deadline: None,
             hovered: None,
             redraw: false,
             background: parse_rgba(&style.colors.bg)?,
@@ -380,6 +387,7 @@ impl Shell for MenuPopup {
         match event {
             InputEvent::PointerMotion { position, .. }
             | InputEvent::PointerEnter { position, .. } => {
+                self.pointer_leave_deadline = None;
                 self.hovered = self.row_at(position.y);
                 self.redraw = true;
             }
@@ -397,6 +405,9 @@ impl Shell for MenuPopup {
                 }
                 self.closed = self.selection.is_some();
             }
+            InputEvent::PointerLeave => {
+                self.pointer_leave_deadline = Some(Instant::now() + POINTER_LEAVE_GRACE);
+            }
             InputEvent::FocusLost | InputEvent::CloseRequested => self.closed = true,
             InputEvent::Key {
                 keycode: 1 | 9,
@@ -411,6 +422,9 @@ impl Shell for MenuPopup {
     }
     fn should_close(&self) -> bool {
         self.closed
+            || self
+                .pointer_leave_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
     }
 }
 
@@ -497,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn pointer_leave_does_not_close_menu() {
+    fn pointer_leave_allows_time_to_reach_menu() {
         let rows = vec![MenuEntry {
             id: 1,
             label: "Open".to_string(),
@@ -509,7 +523,13 @@ mod tests {
         let mut popup = MenuPopup::new(rows, 1200, 1920, None, &StyleConfig::default()).unwrap();
         popup.handle_event(SurfaceId(0), InputEvent::PointerLeave);
         assert!(!popup.should_close());
-        popup.handle_event(SurfaceId(0), InputEvent::FocusLost);
-        assert!(popup.should_close());
+        popup.handle_event(
+            SurfaceId(0),
+            InputEvent::PointerEnter {
+                position: shell_surface::PositionF64::new(10.0, 10.0),
+                output: None,
+            },
+        );
+        assert!(!popup.should_close());
     }
 }
