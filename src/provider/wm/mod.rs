@@ -20,6 +20,8 @@ pub(crate) struct Workspace {
     pub(crate) monitor_id: i64,
     #[serde(default)]
     pub(crate) monitor: String,
+    #[serde(default)]
+    pub(crate) urgent: bool,
 }
 
 pub(crate) trait WmClient: Send + Sync {

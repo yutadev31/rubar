@@ -1,6 +1,7 @@
 use super::{WmClient, Workspace, WorkspaceState};
 use serde::Deserialize;
 use std::{
+    collections::HashSet,
     io::{BufRead, BufReader, Read, Write},
     net::Shutdown,
     os::unix::net::UnixStream,
@@ -26,6 +27,15 @@ struct HyprMonitor {
 struct HyprActiveWorkspace {
     id: i64,
 }
+#[derive(Debug, Deserialize)]
+struct HyprClient {
+    address: String,
+    workspace: HyprClientWorkspace,
+}
+#[derive(Debug, Deserialize)]
+struct HyprClientWorkspace {
+    id: i64,
+}
 
 pub(crate) struct HyprlandClient {
     socket_dir: PathBuf,
@@ -38,7 +48,7 @@ impl HyprlandClient {
         let socket_dir = hyprland_socket_dir()?;
         let state = Arc::new(RwLock::new(None));
         let title = Arc::new(RwLock::new(read_window_title(&socket_dir)?));
-        update_state(&socket_dir, &state);
+        update_state(&socket_dir, &state, &HashSet::new());
 
         let event_socket = socket_dir.join(".socket2.sock");
         let command_socket = socket_dir.clone();
@@ -50,6 +60,7 @@ impl HyprlandClient {
                 command_socket,
                 shared_state,
                 shared_title,
+                HashSet::new(),
                 reconnect_interval,
             )
         });
@@ -153,6 +164,7 @@ fn event_loop(
     command_socket: PathBuf,
     state: Arc<RwLock<Option<WorkspaceState>>>,
     title: Arc<RwLock<Option<String>>>,
+    mut urgent_windows: HashSet<String>,
     reconnect_interval: Duration,
 ) {
     loop {
@@ -162,9 +174,26 @@ fn event_loop(
                 for line in reader.lines() {
                     match line {
                         Ok(event) if is_workspace_event(&event) => {
-                            update_state(&command_socket, &state)
+                            update_state(&command_socket, &state, &urgent_windows)
+                        }
+                        Ok(event) if is_urgent_event(&event) => {
+                            if let Some((_, address)) = event.split_once(">>") {
+                                urgent_windows.insert(window_address(address).to_string());
+                                update_state(&command_socket, &state, &urgent_windows);
+                            }
                         }
                         Ok(event) if is_window_event(&event) => {
+                            if let Some((name, address)) = event.split_once(">>")
+                                && matches!(name, "activewindowv2" | "closewindow")
+                            {
+                                urgent_windows.remove(window_address(address));
+                            }
+                            if matches!(
+                                event.split_once(">>").map(|(name, _)| name),
+                                Some("openwindow" | "closewindow" | "activewindowv2")
+                            ) {
+                                update_state(&command_socket, &state, &urgent_windows);
+                            }
                             match read_window_title(&command_socket) {
                                 Ok(value) => {
                                     if let Ok(mut target) = title.write() {
@@ -201,6 +230,8 @@ fn is_workspace_event(event: &str) -> bool {
                 | "createworkspace"
                 | "destroyworkspace"
                 | "moveworkspace"
+                | "movewindow"
+                | "movewindowv2"
                 | "renameworkspace"
                 | "activespecial"
                 | "activelayout"
@@ -215,8 +246,22 @@ fn is_window_event(event: &str) -> bool {
     )
 }
 
-fn update_state(socket_dir: &Path, state: &Arc<RwLock<Option<WorkspaceState>>>) {
-    match read_state(socket_dir) {
+fn is_urgent_event(event: &str) -> bool {
+    event
+        .split_once(">>")
+        .is_some_and(|(name, address)| name == "urgent" && !address.is_empty())
+}
+
+fn window_address(address: &str) -> &str {
+    address.strip_prefix("0x").unwrap_or(address)
+}
+
+fn update_state(
+    socket_dir: &Path,
+    state: &Arc<RwLock<Option<WorkspaceState>>>,
+    urgent_windows: &HashSet<String>,
+) {
+    match read_state(socket_dir, urgent_windows) {
         Ok(new_state) => {
             if let Ok(mut state) = state.write() {
                 *state = Some(new_state);
@@ -226,9 +271,17 @@ fn update_state(socket_dir: &Path, state: &Arc<RwLock<Option<WorkspaceState>>>) 
     }
 }
 
-fn read_state(socket_dir: &Path) -> Result<WorkspaceState, String> {
+fn read_state(
+    socket_dir: &Path,
+    urgent_windows: &HashSet<String>,
+) -> Result<WorkspaceState, String> {
     let mut workspaces = request_json::<Vec<Workspace>>(socket_dir, "j/workspaces")?;
     workspaces.sort_by_key(|workspace| workspace.id);
+    let clients = request_json::<Vec<HyprClient>>(socket_dir, "j/clients")?;
+    let urgent_workspace_ids = urgent_workspace_ids(clients, urgent_windows);
+    for workspace in &mut workspaces {
+        workspace.urgent = urgent_workspace_ids.contains(&workspace.id);
+    }
     let active = request_json::<ActiveWorkspace>(socket_dir, "j/activeworkspace")?;
     let monitors = request_json::<Vec<HyprMonitor>>(socket_dir, "j/monitors").unwrap_or_default();
     let active_ids = monitors
@@ -241,6 +294,42 @@ fn read_state(socket_dir: &Path) -> Result<WorkspaceState, String> {
         active_monitor_id: active.monitor_id,
         active_ids,
     })
+}
+
+fn urgent_workspace_ids(
+    clients: Vec<HyprClient>,
+    urgent_windows: &HashSet<String>,
+) -> HashSet<i64> {
+    clients
+        .into_iter()
+        .filter(|client| urgent_windows.contains(window_address(&client.address)))
+        .map(|client| client.workspace.id)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HyprClient, HyprClientWorkspace, urgent_workspace_ids, window_address};
+    use std::collections::HashSet;
+
+    #[test]
+    fn urgent_event_address_matches_client_address() {
+        let urgent_windows = HashSet::from([window_address("abc123").to_string()]);
+        let clients = vec![
+            HyprClient {
+                address: "0xabc123".to_string(),
+                workspace: HyprClientWorkspace { id: 2 },
+            },
+            HyprClient {
+                address: "0xdef456".to_string(),
+                workspace: HyprClientWorkspace { id: 3 },
+            },
+        ];
+        assert_eq!(
+            urgent_workspace_ids(clients, &urgent_windows),
+            HashSet::from([2])
+        );
+    }
 }
 
 fn request_json<T>(socket_dir: &Path, request: &str) -> Result<T, String>

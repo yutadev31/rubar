@@ -9,6 +9,7 @@ use super::{Widget, WidgetButton, WidgetContent};
 pub struct Workspace {
     format: String,
     active_color: [u8; 4],
+    urgent_color: [u8; 4],
     active_indicator_height: u32,
     active_indicator_at_top: bool,
     padding: u32,
@@ -34,6 +35,7 @@ struct RenderedWorkspace {
     text: String,
     active: bool,
     active_on_monitor: bool,
+    urgent: bool,
 }
 
 impl From<&RenderedWorkspace> for WorkspaceTarget {
@@ -58,6 +60,13 @@ impl Workspace {
                 [0, 128, 255, 255]
             }),
             active_indicator_height: config.active_indicator_height,
+            urgent_color: parse_color(&config.urgent_color).unwrap_or_else(|error| {
+                eprintln!(
+                    "rubar: invalid workspace urgent_color `{}`: {error}; using #f7768e",
+                    config.urgent_color
+                );
+                [247, 118, 142, 255]
+            }),
             active_indicator_at_top: match config.active_indicator_position.as_str() {
                 "top" => true,
                 "bottom" => false,
@@ -112,14 +121,20 @@ impl Widget for Workspace {
                     icon: None,
                     padding: Some(self.padding),
                     bold: Some(workspace.active),
-                    color: if workspace.active {
+                    color: if workspace.urgent {
+                        Some(self.urgent_color)
+                    } else if workspace.active {
                         Some(self.active_color)
                     } else {
                         None
                     },
                     background: None,
                     indicator: workspace.active_on_monitor.then_some((
-                        self.active_color,
+                        if workspace.urgent {
+                            self.urgent_color
+                        } else {
+                            self.active_color
+                        },
                         self.active_indicator_height,
                         self.active_indicator_at_top,
                     )),
@@ -219,6 +234,7 @@ fn render_workspaces(
                 text,
                 active: workspace.id == active_id,
                 active_on_monitor: workspace.id == globally_active_id,
+                urgent: workspace.urgent,
             }
         })
         .collect()
@@ -240,18 +256,21 @@ mod tests {
                     name: "1".to_string(),
                     monitor_id: 0,
                     monitor: "DP-1".to_string(),
+                    urgent: false,
                 },
                 Workspace {
                     id: 2,
                     name: "dev".to_string(),
                     monitor_id: 0,
                     monitor: "DP-1".to_string(),
+                    urgent: false,
                 },
                 Workspace {
                     id: 11,
                     name: "1".to_string(),
                     monitor_id: 1,
                     monitor: "HDMI-A-1".to_string(),
+                    urgent: false,
                 },
             ],
             active_id: 2,
@@ -267,7 +286,8 @@ mod tests {
                     local_index: Some(1),
                     text: "1".to_string(),
                     active: false,
-                    active_on_monitor: false
+                    active_on_monitor: false,
+                    urgent: false
                 },
                 RenderedWorkspace {
                     id: 2,
@@ -275,7 +295,8 @@ mod tests {
                     local_index: None,
                     text: "dev".to_string(),
                     active: true,
-                    active_on_monitor: true
+                    active_on_monitor: true,
+                    urgent: false
                 },
             ]
         );
@@ -288,7 +309,8 @@ mod tests {
                     local_index: Some(1),
                     text: "1".to_string(),
                     active: false,
-                    active_on_monitor: false
+                    active_on_monitor: false,
+                    urgent: false
                 },
                 RenderedWorkspace {
                     id: 2,
@@ -296,7 +318,8 @@ mod tests {
                     local_index: None,
                     text: "dev".to_string(),
                     active: true,
-                    active_on_monitor: true
+                    active_on_monitor: true,
+                    urgent: false
                 },
                 RenderedWorkspace {
                     id: 11,
@@ -304,7 +327,8 @@ mod tests {
                     local_index: Some(1),
                     text: "1".to_string(),
                     active: false,
-                    active_on_monitor: false
+                    active_on_monitor: false,
+                    urgent: false
                 },
             ]
         );
@@ -316,7 +340,8 @@ mod tests {
                 local_index: Some(1),
                 text: "1".to_string(),
                 active: true,
-                active_on_monitor: false
+                active_on_monitor: false,
+                urgent: false
             }]
         );
     }

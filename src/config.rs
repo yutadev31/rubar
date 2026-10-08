@@ -66,6 +66,7 @@ pub struct WorkspaceConfig {
     pub padding: u32,
     pub spacing: u32,
     pub active_color: String,
+    pub urgent_color: String,
     pub active_indicator_height: u32,
     pub active_indicator_position: String,
     pub all_monitors: bool,
@@ -153,6 +154,7 @@ impl Default for WorkspaceConfig {
             padding: 10,
             spacing: 4,
             active_color: "#7aa2f7".to_string(),
+            urgent_color: "#f7768e".to_string(),
             active_indicator_height: 2,
             active_indicator_position: "bottom".to_string(),
             // A bar now exists on every output, so the workspace module should

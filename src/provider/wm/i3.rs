@@ -27,6 +27,8 @@ struct IpcWorkspace {
     focused: bool,
     #[serde(default)]
     visible: bool,
+    #[serde(default)]
+    urgent: bool,
 }
 
 impl I3Client {
@@ -178,12 +180,13 @@ fn update_ipc_state(
                 workspace.output.clone(),
                 workspace.focused,
                 workspace.visible,
+                workspace.urgent,
             ));
         } else {
             // A missing workspace is placed on the focused output so it is
             // visible with the default all-monitors setting and can be
             // created by clicking its button.
-            specs.push((name.clone(), fallback_output.clone(), false, false));
+            specs.push((name.clone(), fallback_output.clone(), false, false, false));
         }
     }
     specs.extend(
@@ -196,6 +199,7 @@ fn update_ipc_state(
                     workspace.output.clone(),
                     workspace.focused,
                     workspace.visible,
+                    workspace.urgent,
                 )
             }),
     );
@@ -204,7 +208,7 @@ fn update_ipc_state(
     let workspaces = specs
         .iter()
         .enumerate()
-        .map(|(index, (name, output, _, _))| {
+        .map(|(index, (name, output, _, _, urgent))| {
             let id = index as i64 + 1;
             names.insert(id, name.clone());
             Workspace {
@@ -212,10 +216,11 @@ fn update_ipc_state(
                 name: name.clone(),
                 monitor_id: *output_ids.get(output).unwrap_or(&0),
                 monitor: output.clone(),
+                urgent: *urgent,
             }
         })
         .collect::<Vec<_>>();
-    let active_index = specs.iter().position(|(_, _, focused, _)| *focused);
+    let active_index = specs.iter().position(|(_, _, focused, _, _)| *focused);
     let active_id = active_index
         .map(|index| index as i64 + 1)
         .unwrap_or_default();
@@ -226,8 +231,8 @@ fn update_ipc_state(
     let active_ids = specs
         .iter()
         .enumerate()
-        .filter(|(_, (_, _, _, visible))| *visible)
-        .map(|(index, (_, output, _, _))| (output.clone(), index as i64 + 1))
+        .filter(|(_, (_, _, _, visible, _))| *visible)
+        .map(|(index, (_, output, _, _, _))| (output.clone(), index as i64 + 1))
         .collect();
 
     if let Ok(mut target) = state.write() {
