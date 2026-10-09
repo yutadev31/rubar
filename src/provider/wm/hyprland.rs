@@ -307,31 +307,6 @@ fn urgent_workspace_ids(
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{HyprClient, HyprClientWorkspace, urgent_workspace_ids, window_address};
-    use std::collections::HashSet;
-
-    #[test]
-    fn urgent_event_address_matches_client_address() {
-        let urgent_windows = HashSet::from([window_address("abc123").to_string()]);
-        let clients = vec![
-            HyprClient {
-                address: "0xabc123".to_string(),
-                workspace: HyprClientWorkspace { id: 2 },
-            },
-            HyprClient {
-                address: "0xdef456".to_string(),
-                workspace: HyprClientWorkspace { id: 3 },
-            },
-        ];
-        assert_eq!(
-            urgent_workspace_ids(clients, &urgent_windows),
-            HashSet::from([2])
-        );
-    }
-}
-
 fn request_json<T>(socket_dir: &Path, request: &str) -> Result<T, String>
 where
     T: for<'de> Deserialize<'de>,
@@ -357,4 +332,29 @@ fn read_window_title(dir: &Path) -> Result<Option<String>, String> {
         .and_then(serde_json::Value::as_str)
         .filter(|title| !title.is_empty())
         .map(str::to_owned))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HyprClient, HyprClientWorkspace, urgent_workspace_ids, window_address};
+    use std::collections::HashSet;
+
+    #[test]
+    fn urgent_event_address_matches_client_address() {
+        let urgent_windows = HashSet::from([window_address("abc123").to_string()]);
+        let clients = vec![
+            HyprClient {
+                address: "0xabc123".to_string(),
+                workspace: HyprClientWorkspace { id: 2 },
+            },
+            HyprClient {
+                address: "0xdef456".to_string(),
+                workspace: HyprClientWorkspace { id: 3 },
+            },
+        ];
+        assert_eq!(
+            urgent_workspace_ids(clients, &urgent_windows),
+            HashSet::from([2])
+        );
+    }
 }
