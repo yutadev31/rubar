@@ -1,5 +1,6 @@
 pub(crate) mod hyprland;
 pub(crate) mod i3;
+pub(crate) mod niri;
 
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -55,6 +56,10 @@ pub(crate) fn connect(persistent_workspaces: &[i64]) -> Arc<dyn WmClient> {
         {
             return Arc::new(provider);
         }
+    }
+
+    if let Ok(provider) = niri::NiriClient::new(RECONNECT_INTERVAL) {
+        return Arc::new(provider);
     }
 
     match hyprland::HyprlandClient::new(RECONNECT_INTERVAL) {
