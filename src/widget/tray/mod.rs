@@ -92,7 +92,7 @@ impl Widget for Tray {
                     WidgetButton {
                         text: None,
                         icon,
-                        padding: Some(4),
+                        padding: Some(0),
                         bold: None,
                         color: None,
                         background: None,
