@@ -31,6 +31,26 @@ struct IpcWorkspace {
     urgent: bool,
 }
 
+struct WorkspaceSpec {
+    name: String,
+    output: String,
+    focused: bool,
+    visible: bool,
+    urgent: bool,
+}
+
+impl From<&IpcWorkspace> for WorkspaceSpec {
+    fn from(workspace: &IpcWorkspace) -> Self {
+        Self {
+            name: workspace.name.clone(),
+            output: workspace.output.clone(),
+            focused: workspace.focused,
+            visible: workspace.visible,
+            urgent: workspace.urgent,
+        }
+    }
+}
+
 impl I3Client {
     pub(crate) fn new(
         wm_name: &'static str,
@@ -172,8 +192,24 @@ fn update_ipc_state(
     let raw: Vec<IpcWorkspace> = serde_json::from_slice(&response)
         .map_err(|error| format!("could not parse {wm_name} workspaces: {error}"))?;
 
+    let (new_state, names) = workspace_snapshot(&raw, persistent_workspaces);
+    match state.write() {
+        Ok(mut target) => *target = Some(new_state),
+        Err(error) => tracing::error!("rubar: could not update {wm_name} workspace state: {error}"),
+    }
+    match workspace_names.write() {
+        Ok(mut target) => *target = names,
+        Err(error) => tracing::error!("rubar: could not update {wm_name} workspace names: {error}"),
+    }
+    Ok(())
+}
+
+fn workspace_snapshot(
+    raw: &[IpcWorkspace],
+    persistent_workspaces: &[String],
+) -> (WorkspaceState, HashMap<i64, String>) {
     let mut output_ids = HashMap::new();
-    for workspace in &raw {
+    for workspace in raw {
         let next_id = output_ids.len() as i64;
         output_ids
             .entry(workspace.output.clone())
@@ -195,52 +231,44 @@ fn update_ipc_state(
             .find(|(index, workspace)| !used[*index] && workspace.name == *name)
         {
             used[index] = true;
-            specs.push((
-                workspace.name.clone(),
-                workspace.output.clone(),
-                workspace.focused,
-                workspace.visible,
-                workspace.urgent,
-            ));
+            specs.push(WorkspaceSpec::from(workspace));
         } else {
             // A missing workspace is placed on the focused output so it is
             // visible with the default all-monitors setting and can be
             // created by clicking its button.
-            specs.push((name.clone(), fallback_output.clone(), false, false, false));
+            specs.push(WorkspaceSpec {
+                name: name.clone(),
+                output: fallback_output.clone(),
+                focused: false,
+                visible: false,
+                urgent: false,
+            });
         }
     }
     specs.extend(
         raw.iter()
             .enumerate()
             .filter(|(index, _)| !used[*index])
-            .map(|(_, workspace)| {
-                (
-                    workspace.name.clone(),
-                    workspace.output.clone(),
-                    workspace.focused,
-                    workspace.visible,
-                    workspace.urgent,
-                )
-            }),
+            .map(|(_, workspace)| WorkspaceSpec::from(workspace)),
     );
 
     let mut names = HashMap::new();
     let workspaces = specs
         .iter()
         .enumerate()
-        .map(|(index, (name, output, _, _, urgent))| {
+        .map(|(index, spec)| {
             let id = index as i64 + 1;
-            names.insert(id, name.clone());
+            names.insert(id, spec.name.clone());
             Workspace {
                 id,
-                name: name.clone(),
-                monitor_id: *output_ids.get(output).unwrap_or(&0),
-                monitor: output.clone(),
-                urgent: *urgent,
+                name: spec.name.clone(),
+                monitor_id: *output_ids.get(&spec.output).unwrap_or(&0),
+                monitor: spec.output.clone(),
+                urgent: spec.urgent,
             }
         })
         .collect::<Vec<_>>();
-    let active_index = specs.iter().position(|(_, _, focused, _, _)| *focused);
+    let active_index = specs.iter().position(|spec| spec.focused);
     let active_id = active_index
         .map(|index| index as i64 + 1)
         .unwrap_or_default();
@@ -251,26 +279,19 @@ fn update_ipc_state(
     let active_ids = specs
         .iter()
         .enumerate()
-        .filter(|(_, (_, _, _, visible, _))| *visible)
-        .map(|(index, (_, output, _, _, _))| (output.clone(), index as i64 + 1))
+        .filter(|(_, spec)| spec.visible)
+        .map(|(index, spec)| (spec.output.clone(), index as i64 + 1))
         .collect();
 
-    match state.write() {
-        Ok(mut target) => {
-            *target = Some(WorkspaceState {
-                workspaces,
-                active_id,
-                active_monitor_id,
-                active_ids,
-            })
-        }
-        Err(error) => tracing::error!("rubar: could not update {wm_name} workspace state: {error}"),
-    }
-    match workspace_names.write() {
-        Ok(mut target) => *target = names,
-        Err(error) => tracing::error!("rubar: could not update {wm_name} workspace names: {error}"),
-    }
-    Ok(())
+    (
+        WorkspaceState {
+            workspaces,
+            active_id,
+            active_monitor_id,
+            active_ids,
+        },
+        names,
+    )
 }
 
 fn ipc_event_loop(
@@ -405,4 +426,38 @@ fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
             .find_map(focused)
     }
     Ok(focused(&tree))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IpcWorkspace, workspace_snapshot};
+
+    #[test]
+    fn persistent_workspaces_keep_order_and_focused_output() {
+        let raw = vec![
+            IpcWorkspace {
+                name: "2".into(),
+                output: "DP-1".into(),
+                focused: true,
+                visible: true,
+                urgent: false,
+            },
+            IpcWorkspace {
+                name: "web".into(),
+                output: "HDMI-1".into(),
+                focused: false,
+                visible: true,
+                urgent: true,
+            },
+        ];
+        let (state, names) = workspace_snapshot(&raw, &["1".into(), "2".into()]);
+
+        assert_eq!(names.get(&1).map(String::as_str), Some("1"));
+        assert_eq!(names.get(&2).map(String::as_str), Some("2"));
+        assert_eq!(names.get(&3).map(String::as_str), Some("web"));
+        assert_eq!(state.workspaces[0].monitor, "DP-1");
+        assert_eq!(state.active_id, 2);
+        assert_eq!(state.active_ids.get("DP-1"), Some(&2));
+        assert!(state.workspaces[2].urgent);
+    }
 }

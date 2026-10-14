@@ -11,6 +11,7 @@ use pulse::{
     context::introspect::{SinkInfo, SourceInfo},
     context::subscribe::{self, InterestMaskSet},
     mainloop::threaded::Mainloop,
+    operation::{Operation, State as OperationState},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +67,29 @@ pub struct PulseAudio {
     context: Rc<RefCell<pulse::context::Context>>,
     mainloop: Rc<RefCell<Mainloop>>,
     state: Arc<Mutex<Option<VolumeState>>>,
+}
+
+fn complete_operation<C: ?Sized>(
+    mainloop: &Rc<RefCell<Mainloop>>,
+    operation: &Operation<C>,
+    cancelled_message: &str,
+) -> Result<(), String> {
+    while operation.get_state() == OperationState::Running {
+        mainloop.borrow_mut().wait();
+    }
+    let cancelled = operation.get_state() == OperationState::Cancelled;
+    mainloop.borrow_mut().unlock();
+    if cancelled {
+        Err(cancelled_message.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn pulse_volume(percent: u8) -> pulse::volume::Volume {
+    let value =
+        ((f64::from(percent) / 100.0) * f64::from(pulse::volume::Volume::NORMAL.0)).round() as u32;
+    pulse::volume::Volume(value)
 }
 
 impl PulseAudio {
@@ -265,14 +289,11 @@ impl VolumeProvider for PulseAudio {
                 unsafe { (*mainloop_ref.as_ptr()).signal(false) };
             })),
         );
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
-        }
-        if operation.get_state() == pulse::operation::State::Cancelled {
-            self.mainloop.borrow_mut().unlock();
-            return Err("PulseAudio volume operation was cancelled".to_string());
-        }
-        self.mainloop.borrow_mut().unlock();
+        complete_operation(
+            &self.mainloop,
+            &operation,
+            "PulseAudio volume operation was cancelled",
+        )?;
         if result.borrow_mut().take().unwrap_or(false) {
             Ok(())
         } else {
@@ -282,10 +303,8 @@ impl VolumeProvider for PulseAudio {
 
     fn set_percent(&mut self, percent: u8) -> Result<(), String> {
         let sink = self.read_default_sink()?;
-        let value =
-            ((percent as f64 / 100.0) * pulse::volume::Volume::NORMAL.0 as f64).round() as u32;
         let mut volumes = sink.volume;
-        volumes.set(volumes.len(), pulse::volume::Volume(value));
+        volumes.set(volumes.len(), pulse_volume(percent));
 
         self.mainloop.borrow_mut().lock();
         let mainloop_ref = Rc::clone(&self.mainloop);
@@ -296,15 +315,11 @@ impl VolumeProvider for PulseAudio {
                 unsafe { (*mainloop_ref.as_ptr()).signal(false) };
             })),
         );
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
-        }
-        if operation.get_state() == pulse::operation::State::Cancelled {
-            self.mainloop.borrow_mut().unlock();
-            return Err("PulseAudio volume operation was cancelled".to_string());
-        }
-        self.mainloop.borrow_mut().unlock();
-        Ok(())
+        complete_operation(
+            &self.mainloop,
+            &operation,
+            "PulseAudio volume operation was cancelled",
+        )
     }
 
     fn set_in_muted(&mut self, muted: bool) -> Result<(), String> {
@@ -318,24 +333,17 @@ impl VolumeProvider for PulseAudio {
                 unsafe { (*mainloop_ref.as_ptr()).signal(false) };
             })),
         );
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
-        }
-        let cancelled = operation.get_state() == pulse::operation::State::Cancelled;
-        self.mainloop.borrow_mut().unlock();
-        if cancelled {
-            Err("PulseAudio input mute operation was cancelled".to_string())
-        } else {
-            Ok(())
-        }
+        complete_operation(
+            &self.mainloop,
+            &operation,
+            "PulseAudio input mute operation was cancelled",
+        )
     }
 
     fn set_in_percent(&mut self, percent: u8) -> Result<(), String> {
         let source = self.read_default_source()?;
-        let value =
-            ((percent as f64 / 100.0) * pulse::volume::Volume::NORMAL.0 as f64).round() as u32;
         let mut volumes = source.volume;
-        volumes.set(volumes.len(), pulse::volume::Volume(value));
+        volumes.set(volumes.len(), pulse_volume(percent));
 
         self.mainloop.borrow_mut().lock();
         let mainloop_ref = Rc::clone(&self.mainloop);
@@ -350,16 +358,11 @@ impl VolumeProvider for PulseAudio {
                     unsafe { (*mainloop_ref.as_ptr()).signal(false) };
                 })),
             );
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
-        }
-        let cancelled = operation.get_state() == pulse::operation::State::Cancelled;
-        self.mainloop.borrow_mut().unlock();
-        if cancelled {
-            Err("PulseAudio input volume operation was cancelled".to_string())
-        } else {
-            Ok(())
-        }
+        complete_operation(
+            &self.mainloop,
+            &operation,
+            "PulseAudio input volume operation was cancelled",
+        )
     }
 }
 
