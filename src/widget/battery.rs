@@ -34,7 +34,13 @@ impl Widget for Battery {
             .last_refresh
             .is_none_or(|last| last.elapsed() >= self.refresh_interval);
         if should_refresh {
-            self.state = self.provider.read().ok();
+            self.state = match self.provider.read() {
+                Ok(state) => Some(state),
+                Err(error) => {
+                    tracing::warn!("rubar: could not read battery state: {error}");
+                    None
+                }
+            };
             self.last_refresh = Some(Instant::now());
         }
         let Some(state) = self.state else {

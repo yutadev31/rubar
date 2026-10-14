@@ -201,7 +201,9 @@ impl Watcher {
             .cloned()
             .collect::<Vec<_>>();
         items.sort_by(|a, b| a.service.cmp(&b.service));
-        let _ = self.sender.send(items);
+        if let Err(error) = self.sender.send(items) {
+            tracing::debug!("tray receiver was dropped: {error}");
+        }
     }
 }
 
@@ -238,10 +240,12 @@ impl Watcher {
             .expect("SNI item lock poisoned")
             .insert(service.clone(), item);
         self.publish();
-        let _ = zbus::block_on(Self::status_notifier_item_registered(
+        if let Err(error) = zbus::block_on(Self::status_notifier_item_registered(
             &emitter,
             &format!("{service}{path}"),
-        ));
+        )) {
+            tracing::warn!("rubar: could not notify tray item registration: {error}");
+        }
         let items = Arc::clone(&self.items);
         let sender = self.sender.clone();
         thread::spawn(move || watch_item(service, path, items, sender));
@@ -305,29 +309,44 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
         tracing::warn!("rubar: could not register tray watcher: {error}");
         return;
     }
-    let Ok(watcher_ref) = connection
+    let watcher_ref = match connection
         .object_server()
         .interface::<_, Watcher>(WATCHER_PATH)
-    else {
-        return;
+    {
+        Ok(watcher_ref) => watcher_ref,
+        Err(error) => {
+            tracing::error!("rubar: could not access tray watcher interface: {error}");
+            return;
+        }
     };
-    let Ok(bus) = Proxy::new(
+    let bus = match Proxy::new(
         &connection,
         "org.freedesktop.DBus",
         "/org/freedesktop/DBus",
         "org.freedesktop.DBus",
-    ) else {
-        return;
+    ) {
+        Ok(bus) => bus,
+        Err(error) => {
+            tracing::error!("rubar: could not connect to session bus daemon: {error}");
+            return;
+        }
     };
-    let Ok(owner_changes) = bus.receive_signal("NameOwnerChanged") else {
-        return;
+    let owner_changes = match bus.receive_signal("NameOwnerChanged") {
+        Ok(signals) => signals,
+        Err(error) => {
+            tracing::error!("rubar: could not subscribe to D-Bus name changes: {error}");
+            return;
+        }
     };
     for message in owner_changes {
-        let Ok((name, old_owner, new_owner)) =
-            message.body().deserialize::<(String, String, String)>()
-        else {
-            continue;
-        };
+        let (name, old_owner, new_owner) =
+            match message.body().deserialize::<(String, String, String)>() {
+                Ok(change) => change,
+                Err(error) => {
+                    tracing::warn!("rubar: could not decode D-Bus name change: {error}");
+                    continue;
+                }
+            };
         // A disappearing service has an old owner and no new owner. Ignore
         // acquisitions and ownership changes where another owner takes over.
         if old_owner.is_empty() || !new_owner.is_empty() {
@@ -342,20 +361,28 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
                 .cloned()
                 .collect::<Vec<_>>();
             current.sort_by(|a, b| a.service.cmp(&b.service));
-            let _ = sender.send(current);
-            let _ = zbus::block_on(Watcher::status_notifier_item_unregistered(
+            if let Err(error) = sender.send(current) {
+                tracing::debug!("tray receiver was dropped: {error}");
+            }
+            if let Err(error) = zbus::block_on(Watcher::status_notifier_item_unregistered(
                 watcher_ref.signal_emitter(),
                 &format!("{}{}", item.service, item.path),
-            ));
+            )) {
+                tracing::warn!("rubar: could not notify tray item unregistration: {error}");
+            }
         }
     }
 }
 
 fn watch_item(service: String, path: String, items: Items, sender: mpsc::Sender<Vec<TrayItem>>) {
-    if let Ok(connection) = Connection::session()
-        && let Ok(proxy) = item_proxy(&connection, &service, &path)
-    {
-        update_icon(&proxy, &service, &items, &sender);
+    match Connection::session() {
+        Ok(connection) => match item_proxy(&connection, &service, &path) {
+            Ok(proxy) => update_icon(&proxy, &service, &items, &sender),
+            Err(error) => {
+                tracing::warn!("rubar: could not create tray item proxy for {service}: {error}")
+            }
+        },
+        Err(error) => tracing::warn!("rubar: could not connect to tray item {service}: {error}"),
     }
     for signal in ["NewIcon", "NewAttentionIcon", "NewStatus"] {
         let service = service.clone();
@@ -373,14 +400,28 @@ fn watch_item_signal(
     sender: mpsc::Sender<Vec<TrayItem>>,
     signal: &'static str,
 ) {
-    let Ok(connection) = Connection::session() else {
-        return;
+    let connection = match Connection::session() {
+        Ok(connection) => connection,
+        Err(error) => {
+            tracing::warn!("rubar: could not connect to tray item {service} for {signal}: {error}");
+            return;
+        }
     };
-    let Ok(proxy) = item_proxy(&connection, &service, &path) else {
-        return;
+    let proxy = match item_proxy(&connection, &service, &path) {
+        Ok(proxy) => proxy,
+        Err(error) => {
+            tracing::warn!("rubar: could not create tray item proxy for {service}: {error}");
+            return;
+        }
     };
-    let Ok(mut signals) = proxy.receive_signal(signal) else {
-        return;
+    let mut signals = match proxy.receive_signal(signal) {
+        Ok(signals) => signals,
+        Err(error) => {
+            tracing::warn!(
+                "rubar: could not subscribe to {signal} for tray item {service}: {error}"
+            );
+            return;
+        }
     };
     while signals.next().is_some() {
         update_icon(&proxy, &service, &items, &sender);
@@ -450,7 +491,9 @@ fn publish_items(items: &Items, sender: &mpsc::Sender<Vec<TrayItem>>) {
         .cloned()
         .collect::<Vec<_>>();
     current.sort_by(|a, b| a.service.cmp(&b.service));
-    let _ = sender.send(current);
+    if let Err(error) = sender.send(current) {
+        tracing::debug!("tray receiver was dropped: {error}");
+    }
 }
 
 fn choose_icon(pixmaps: &[(i32, i32, Vec<u8>)], target: i32) -> Option<TrayIcon> {

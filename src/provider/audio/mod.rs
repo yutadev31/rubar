@@ -230,13 +230,16 @@ impl VolumeProvider for PulseAudio {
 
         let sink = self.read_default_sink()?;
         let percent = volume_percent(sink.volume.avg().0);
-        let input = self
-            .read_default_source()
-            .ok()
-            .map(|source| VolumeChannelState {
+        let input = match self.read_default_source() {
+            Ok(source) => Some(VolumeChannelState {
                 percent: volume_percent(source.volume.avg().0),
                 muted: source.mute,
-            });
+            }),
+            Err(error) => {
+                tracing::warn!("rubar: could not read default PulseAudio source: {error}");
+                None
+            }
+        };
         let state = VolumeState {
             output: Some(VolumeChannelState {
                 percent,

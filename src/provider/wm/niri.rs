@@ -60,7 +60,13 @@ impl NiriClient {
 
 impl WmClient for NiriClient {
     fn state(&self) -> Option<WorkspaceState> {
-        self.state.read().ok().and_then(|state| state.clone())
+        match self.state.read() {
+            Ok(state) => state.clone(),
+            Err(error) => {
+                tracing::error!("rubar: could not read niri workspace state: {error}");
+                None
+            }
+        }
     }
 
     fn switch_to(
@@ -80,7 +86,13 @@ impl WmClient for NiriClient {
     }
 
     fn title(&self) -> Option<String> {
-        self.title.read().ok().and_then(|title| title.clone())
+        match self.title.read() {
+            Ok(title) => title.clone(),
+            Err(error) => {
+                tracing::error!("rubar: could not read niri window title: {error}");
+                None
+            }
+        }
     }
 }
 
@@ -131,9 +143,16 @@ fn stream_events(
         if let Some(event) = value.get("WorkspacesChanged") {
             match parse_workspaces(event) {
                 Ok(next) => {
-                    tracing::debug!(workspaces = next.workspaces.len(), active_workspace = next.active_id, "updated niri workspace state");
-                    if let Ok(mut current) = state.write() {
-                        *current = Some(next);
+                    tracing::debug!(
+                        workspaces = next.workspaces.len(),
+                        active_workspace = next.active_id,
+                        "updated niri workspace state"
+                    );
+                    match state.write() {
+                        Ok(mut current) => *current = Some(next),
+                        Err(error) => {
+                            tracing::error!("rubar: could not update niri workspace state: {error}")
+                        }
                     }
                 }
                 Err(error) => tracing::warn!("rubar: could not parse niri workspaces: {error}"),
@@ -218,16 +237,20 @@ fn update_title(event: &Value, title: &RwLock<Option<String>>) {
         })
         .and_then(|window| window.get("title"))
         .and_then(Value::as_str)
-        && let Ok(mut current) = title.write()
     {
-        *current = Some(value.to_string());
+        match title.write() {
+            Ok(mut current) => *current = Some(value.to_string()),
+            Err(error) => tracing::error!("rubar: could not update niri window title: {error}"),
+        }
     }
     if event
         .get("WindowFocusChanged")
         .is_some_and(|v| v.get("id").is_some_and(Value::is_null))
-        && let Ok(mut current) = title.write()
     {
-        *current = None;
+        match title.write() {
+            Ok(mut current) => *current = None,
+            Err(error) => tracing::error!("rubar: could not clear niri window title: {error}"),
+        }
     }
 }
 

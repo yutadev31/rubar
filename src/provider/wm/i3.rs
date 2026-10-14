@@ -90,7 +90,16 @@ impl I3Client {
 
 impl WmClient for I3Client {
     fn state(&self) -> Option<WorkspaceState> {
-        self.state.read().ok().and_then(|state| state.clone())
+        match self.state.read() {
+            Ok(state) => state.clone(),
+            Err(error) => {
+                tracing::error!(
+                    "rubar: could not read {} workspace state: {error}",
+                    self.wm_name
+                );
+                None
+            }
+        }
     }
 
     fn switch_to(
@@ -102,8 +111,9 @@ impl WmClient for I3Client {
         let name = self
             .workspace_names
             .read()
-            .ok()
-            .and_then(|names| names.get(&workspace_id).cloned())
+            .map_err(|error| format!("could not read {} workspace names: {error}", self.wm_name))?
+            .get(&workspace_id)
+            .cloned()
             .ok_or_else(|| format!("unknown {} workspace {workspace_id}", self.wm_name))?;
         let response = ipc_request(&self.socket, 0, format!("workspace {name}").as_bytes())?;
         let result = parse_ipc_command_response(&response).map_err(|error| {
@@ -116,7 +126,16 @@ impl WmClient for I3Client {
     }
 
     fn title(&self) -> Option<String> {
-        self.title.read().ok().and_then(|title| title.clone())
+        match self.title.read() {
+            Ok(title) => title.clone(),
+            Err(error) => {
+                tracing::error!(
+                    "rubar: could not read {} window title: {error}",
+                    self.wm_name
+                );
+                None
+            }
+        }
     }
 }
 
@@ -236,16 +255,20 @@ fn update_ipc_state(
         .map(|(index, (_, output, _, _, _))| (output.clone(), index as i64 + 1))
         .collect();
 
-    if let Ok(mut target) = state.write() {
-        *target = Some(WorkspaceState {
-            workspaces,
-            active_id,
-            active_monitor_id,
-            active_ids,
-        });
+    match state.write() {
+        Ok(mut target) => {
+            *target = Some(WorkspaceState {
+                workspaces,
+                active_id,
+                active_monitor_id,
+                active_ids,
+            })
+        }
+        Err(error) => tracing::error!("rubar: could not update {wm_name} workspace state: {error}"),
     }
-    if let Ok(mut target) = workspace_names.write() {
-        *target = names;
+    match workspace_names.write() {
+        Ok(mut target) => *target = names,
+        Err(error) => tracing::error!("rubar: could not update {wm_name} workspace names: {error}"),
     }
     Ok(())
 }
@@ -269,14 +292,19 @@ fn ipc_event_loop(
                         match ipc_read_message(&mut stream) {
                             Ok((message_type, _payload)) if message_type & 0x8000_0000 != 0 => {
                                 let event_type = message_type & 0x7fff_ffff;
-                                tracing::trace!(window_manager = wm_name, event_type, "received window manager event");
+                                tracing::trace!(
+                                    window_manager = wm_name,
+                                    event_type,
+                                    "received window manager event"
+                                );
                                 if event_type == 3 || event_type == 0 {
                                     match read_window_title(&socket) {
-                                        Ok(value) => {
-                                            if let Ok(mut target) = title.write() {
-                                                *target = value;
-                                            }
-                                        }
+                                        Ok(value) => match title.write() {
+                                            Ok(mut target) => *target = value,
+                                            Err(error) => tracing::error!(
+                                                "rubar: could not update {wm_name} window title: {error}"
+                                            ),
+                                        },
                                         Err(error) => tracing::warn!(
                                             "rubar: could not read {wm_name} focused window: {error}"
                                         ),
@@ -284,13 +312,17 @@ fn ipc_event_loop(
                                 } else {
                                     // Workspace and output events refresh the state below.
                                 }
-                                if event_type == 0 || event_type == 1 {
-                                    let _ = update_ipc_state(
+                                if (event_type == 0 || event_type == 1)
+                                    && let Err(error) = update_ipc_state(
                                         wm_name,
                                         &socket,
                                         &state,
                                         &workspace_names,
                                         &persistent_workspaces,
+                                    )
+                                {
+                                    tracing::warn!(
+                                        "rubar: could not refresh {wm_name} workspace state: {error}"
                                     );
                                 }
                             }

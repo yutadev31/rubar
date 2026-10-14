@@ -76,7 +76,13 @@ impl HyprlandClient {
 
 impl WmClient for HyprlandClient {
     fn state(&self) -> Option<WorkspaceState> {
-        self.state.read().ok().and_then(|state| state.clone())
+        match self.state.read() {
+            Ok(state) => state.clone(),
+            Err(error) => {
+                tracing::error!("rubar: could not read Hyprland workspace state: {error}");
+                None
+            }
+        }
     }
 
     fn switch_to(
@@ -131,7 +137,13 @@ impl WmClient for HyprlandClient {
     }
 
     fn title(&self) -> Option<String> {
-        self.title.read().ok().and_then(|title| title.clone())
+        match self.title.read() {
+            Ok(title) => title.clone(),
+            Err(error) => {
+                tracing::error!("rubar: could not read Hyprland window title: {error}");
+                None
+            }
+        }
     }
 }
 
@@ -200,11 +212,12 @@ fn event_loop(
                                 update_state(&command_socket, &state, &urgent_windows);
                             }
                             match read_window_title(&command_socket) {
-                                Ok(value) => {
-                                    if let Ok(mut target) = title.write() {
-                                        *target = value;
-                                    }
-                                }
+                                Ok(value) => match title.write() {
+                                    Ok(mut target) => *target = value,
+                                    Err(error) => tracing::error!(
+                                        "rubar: could not update Hyprland window title: {error}"
+                                    ),
+                                },
                                 Err(error) => tracing::warn!(
                                     "rubar: could not read Hyprland focused window: {error}"
                                 ),
@@ -267,11 +280,12 @@ fn update_state(
     urgent_windows: &HashSet<String>,
 ) {
     match read_state(socket_dir, urgent_windows) {
-        Ok(new_state) => {
-            if let Ok(mut state) = state.write() {
-                *state = Some(new_state);
+        Ok(new_state) => match state.write() {
+            Ok(mut state) => *state = Some(new_state),
+            Err(error) => {
+                tracing::error!("rubar: could not update Hyprland workspace state: {error}")
             }
-        }
+        },
         Err(error) => tracing::warn!("rubar: could not read Hyprland workspace state: {error}"),
     }
 }
@@ -288,7 +302,11 @@ fn read_state(
         workspace.urgent = urgent_workspace_ids.contains(&workspace.id);
     }
     let active = request_json::<ActiveWorkspace>(socket_dir, "j/activeworkspace")?;
-    let monitors = request_json::<Vec<HyprMonitor>>(socket_dir, "j/monitors").unwrap_or_default();
+    let monitors =
+        request_json::<Vec<HyprMonitor>>(socket_dir, "j/monitors").unwrap_or_else(|error| {
+            tracing::warn!("rubar: could not read Hyprland monitors: {error}");
+            Vec::new()
+        });
     let active_ids = monitors
         .into_iter()
         .map(|monitor| (monitor.name, monitor.active_workspace.id))

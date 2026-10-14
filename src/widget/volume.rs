@@ -30,8 +30,9 @@ impl Volume {
 
 impl Widget for Volume {
     fn content(&mut self) -> WidgetContent {
-        if let Ok(state) = self.provider.read() {
-            self.state = Some(state);
+        match self.provider.read() {
+            Ok(state) => self.state = Some(state),
+            Err(error) => tracing::warn!("rubar: could not read volume state: {error}"),
         }
 
         let Some(state) = self.state else {
