@@ -21,7 +21,7 @@ zbus = { version = "5", default-features = false, features = [
   "async-io",
   "blocking-api",
 ] }
-shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "f1c92ce1d201699ccd5627bcaecef28fbeb0787a" }
+shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "247b682dbeff5b0b3726ec8291d6514d2a8a574a" }
 
 [dev-dependencies]
 tempfile = "3"
