@@ -29,7 +29,7 @@
 
         devTools = with pkgs; [
           rust
-          taplo
+          tombi
           nixd
           nixfmt
           typos-lsp
