@@ -52,6 +52,7 @@ pub(crate) fn connect(persistent_workspaces: &[i64]) -> Arc<dyn WmClient> {
 
     if let Some(desktop) = std::env::var_os("XDG_CURRENT_DESKTOP") {
         let desktop = desktop.to_string_lossy();
+        tracing::debug!(desktop = %desktop, "detecting window manager from XDG_CURRENT_DESKTOP");
         let provider = desktop.split(':').find_map(|desktop| match desktop {
             "sway" => Some(
                 i3::I3Client::new("Sway", "SWAYSOCK", RECONNECT_INTERVAL, persistent.clone())
@@ -99,16 +100,21 @@ fn connect_by_detection(persistent: &[String]) -> Arc<dyn WmClient> {
         if let Ok(provider) =
             i3::I3Client::new(name, variable, RECONNECT_INTERVAL, persistent.to_vec())
         {
+            tracing::debug!(window_manager = name, "connected to window manager");
             return Arc::new(provider);
         }
     }
 
     if let Ok(provider) = niri::NiriClient::new(RECONNECT_INTERVAL) {
+        tracing::debug!(window_manager = "niri", "connected to window manager");
         return Arc::new(provider);
     }
 
     match hyprland::HyprlandClient::new(RECONNECT_INTERVAL) {
-        Ok(client) => Arc::new(client),
+        Ok(client) => {
+            tracing::debug!(window_manager = "Hyprland", "connected to window manager");
+            Arc::new(client)
+        }
         Err(error) => {
             tracing::warn!("rubar: could not connect to compositor IPC: {error}");
             Arc::new(UnavailableClient)

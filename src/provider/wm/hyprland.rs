@@ -46,6 +46,7 @@ pub(crate) struct HyprlandClient {
 impl HyprlandClient {
     pub(crate) fn new(reconnect_interval: Duration) -> Result<Self, String> {
         let socket_dir = hyprland_socket_dir()?;
+        tracing::debug!(socket_dir = %socket_dir.display(), "connecting to Hyprland");
         let state = Arc::new(RwLock::new(None));
         let title = Arc::new(RwLock::new(read_window_title(&socket_dir)?));
         update_state(&socket_dir, &state, &HashSet::new());
@@ -170,19 +171,23 @@ fn event_loop(
     loop {
         match UnixStream::connect(&event_socket) {
             Ok(stream) => {
+                tracing::debug!(socket = %event_socket.display(), "connected to Hyprland event stream");
                 let reader = BufReader::new(stream);
                 for line in reader.lines() {
                     match line {
                         Ok(event) if is_workspace_event(&event) => {
+                            tracing::trace!(event, "received Hyprland workspace event");
                             update_state(&command_socket, &state, &urgent_windows)
                         }
                         Ok(event) if is_urgent_event(&event) => {
+                            tracing::trace!(event, "received Hyprland urgency event");
                             if let Some((_, address)) = event.split_once(">>") {
                                 urgent_windows.insert(window_address(address).to_string());
                                 update_state(&command_socket, &state, &urgent_windows);
                             }
                         }
                         Ok(event) if is_window_event(&event) => {
+                            tracing::trace!(event, "received Hyprland window event");
                             if let Some((name, address)) = event.split_once(">>")
                                 && matches!(name, "activewindowv2" | "closewindow")
                             {
@@ -205,7 +210,7 @@ fn event_loop(
                                 ),
                             }
                         }
-                        Ok(_) => {}
+                        Ok(event) => tracing::trace!(event, "ignoring unrelated Hyprland event"),
                         Err(error) => {
                             tracing::warn!("rubar: Hyprland event socket read failed: {error}");
                             break;

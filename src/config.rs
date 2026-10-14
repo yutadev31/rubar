@@ -178,12 +178,17 @@ impl Default for WindowConfig {
 impl Config {
     pub fn load() -> Result<Self, Box<dyn Error>> {
         let Some(path) = config_path() else {
+            tracing::debug!("configuration directory unavailable; using defaults");
             return Ok(Self::default());
         };
         if !path.exists() {
+            tracing::debug!(path = %path.display(), "configuration file not found; using defaults");
             return Ok(Self::default());
         }
-        Ok(toml::from_str(&fs::read_to_string(path)?)?)
+        tracing::debug!(path = %path.display(), "loading configuration");
+        let config = toml::from_str(&fs::read_to_string(&path)?)?;
+        tracing::debug!(path = %path.display(), "configuration loaded");
+        Ok(config)
     }
 }
 

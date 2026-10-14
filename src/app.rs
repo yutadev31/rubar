@@ -24,6 +24,7 @@ pub struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn new(config: &'a Config) -> Result<Self, Box<dyn Error>> {
+        tracing::debug!("initializing window manager client");
         let ipc_client = wm::connect(&config.workspace.persistent_workspaces);
         let widgets = WidgetGroups {
             left: create_widgets(&config.modules.left, config, &ipc_client)?,
@@ -40,8 +41,10 @@ impl<'a> App<'a> {
 
     pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
         let mut backend = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            tracing::debug!("starting Wayland backend");
             Box::new(shell_surface::backend::wayland::WaylandBackend) as Box<dyn Backend>
         } else {
+            tracing::debug!("starting X11 backend");
             Box::new(shell_surface::backend::x11::X11Backend) as Box<dyn Backend>
         };
         backend.run(self)
@@ -59,6 +62,7 @@ impl Shell for App<'_> {
         size: Size,
         output: Option<&str>,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
+        tracing::trace!(width = size.width, height = size.height, output = ?output, "rendering bar");
         self.widgets.set_monitor_name(output);
         Ok(self.renderer.render(
             size.width.max(1),
@@ -139,6 +143,7 @@ fn create_widgets(
     config: &Config,
     ipc_client: &Arc<dyn WmClient>,
 ) -> Result<Vec<Box<dyn crate::widget::Widget>>, Box<dyn Error>> {
+    tracing::debug!(widgets = ?names, "creating widget group");
     names
         .iter()
         .map(|name| match name.as_str() {

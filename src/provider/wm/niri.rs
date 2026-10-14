@@ -39,6 +39,7 @@ impl NiriClient {
         if !socket.exists() {
             return Err(format!("niri socket does not exist: {}", socket.display()));
         }
+        tracing::debug!(socket = %socket.display(), "connecting to niri event stream");
 
         let state = Arc::new(RwLock::new(None));
         let title = Arc::new(RwLock::new(None));
@@ -105,6 +106,7 @@ fn stream_events(
 ) -> Result<(), String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|error| format!("could not connect to niri socket: {error}"))?;
+    tracing::debug!(socket = %socket.display(), "connected to niri event stream");
     serde_json::to_writer(&mut stream, &json!("EventStream"))
         .map_err(|error| format!("could not encode niri event request: {error}"))?;
     stream.write_all(b"\n").map_err(|error| error.to_string())?;
@@ -122,12 +124,14 @@ fn stream_events(
         }
         let value: Value = serde_json::from_str(&line)
             .map_err(|error| format!("could not parse niri event: {error}"))?;
+        tracing::trace!(event = ?value, "received niri event");
         if value.get("Ok").is_some() {
             continue;
         }
         if let Some(event) = value.get("WorkspacesChanged") {
             match parse_workspaces(event) {
                 Ok(next) => {
+                    tracing::debug!(workspaces = next.workspaces.len(), active_workspace = next.active_id, "updated niri workspace state");
                     if let Ok(mut current) = state.write() {
                         *current = Some(next);
                     }

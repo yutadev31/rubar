@@ -51,6 +51,7 @@ impl I3Client {
         let state = Arc::new(RwLock::new(None));
         let workspace_names = Arc::new(RwLock::new(HashMap::new()));
         let title = Arc::new(RwLock::new(read_window_title(&socket)?));
+        tracing::debug!(window_manager = wm_name, socket = %socket.display(), "connecting to window manager");
         update_ipc_state(
             wm_name,
             &socket,
@@ -268,6 +269,7 @@ fn ipc_event_loop(
                         match ipc_read_message(&mut stream) {
                             Ok((message_type, _payload)) if message_type & 0x8000_0000 != 0 => {
                                 let event_type = message_type & 0x7fff_ffff;
+                                tracing::trace!(window_manager = wm_name, event_type, "received window manager event");
                                 if event_type == 3 || event_type == 0 {
                                     match read_window_title(&socket) {
                                         Ok(value) => {
