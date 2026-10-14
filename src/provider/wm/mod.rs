@@ -75,16 +75,18 @@ pub(crate) fn connect(persistent_workspaces: &[i64]) -> Arc<dyn WmClient> {
         match provider {
             Some(Ok(provider)) => return provider,
             Some(Err(error)) => {
-                eprintln!(
+                tracing::warn!(
                     "rubar: could not connect to desktop {desktop}: {error}; falling back to compositor detection"
                 );
             }
-            None => eprintln!(
+            None => tracing::warn!(
                 "rubar: unrecognized XDG_CURRENT_DESKTOP value {desktop:?}; falling back to compositor detection"
             ),
         }
     } else {
-        eprintln!("rubar: XDG_CURRENT_DESKTOP is not set; falling back to compositor detection");
+        tracing::warn!(
+            "rubar: XDG_CURRENT_DESKTOP is not set; falling back to compositor detection"
+        );
     }
 
     connect_by_detection(&persistent)
@@ -108,7 +110,7 @@ fn connect_by_detection(persistent: &[String]) -> Arc<dyn WmClient> {
     match hyprland::HyprlandClient::new(RECONNECT_INTERVAL) {
         Ok(client) => Arc::new(client),
         Err(error) => {
-            eprintln!("rubar: could not connect to compositor IPC: {error}");
+            tracing::warn!("rubar: could not connect to compositor IPC: {error}");
             Arc::new(UnavailableClient)
         }
     }

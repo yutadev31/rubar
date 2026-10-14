@@ -126,7 +126,7 @@ impl Widget for Tray {
                 Ok::<_, zbus::Error>(())
             })();
             if let Err(error) = result {
-                eprintln!("rubar: could not call tray item {method}: {error}");
+                tracing::warn!("rubar: could not call tray item {method}: {error}");
             }
         });
     }
@@ -151,7 +151,7 @@ impl Widget for Tray {
             let _guard = MenuOpenGuard(menu_open);
             let identity = format!("{}{}", item.service, item.path);
             if let Err(error) = menu::open(item, button_left, surface_width, output, &style) {
-                eprintln!("rubar: could not open tray menu {identity}: {error}");
+                tracing::warn!("rubar: could not open tray menu {identity}: {error}");
             }
         });
     }
@@ -287,13 +287,13 @@ impl Watcher {
 }
 
 fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
-    let Ok(connection) =
-        Connection::session().inspect_err(|error| eprintln!("rubar: tray session bus: {error}"))
+    let Ok(connection) = Connection::session()
+        .inspect_err(|error| tracing::warn!("rubar: tray session bus: {error}"))
     else {
         return;
     };
     if let Err(error) = connection.request_name(WATCHER_INTERFACE) {
-        eprintln!("rubar: could not own tray watcher name: {error}");
+        tracing::warn!("rubar: could not own tray watcher name: {error}");
         return;
     }
     let items = Arc::new(Mutex::new(HashMap::new()));
@@ -302,7 +302,7 @@ fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
         sender: sender.clone(),
     };
     if let Err(error) = connection.object_server().at(WATCHER_PATH, watcher) {
-        eprintln!("rubar: could not register tray watcher: {error}");
+        tracing::warn!("rubar: could not register tray watcher: {error}");
         return;
     }
     let Ok(watcher_ref) = connection

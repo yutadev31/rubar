@@ -91,8 +91,8 @@ fn event_loop(
 ) {
     loop {
         match stream_events(&socket, &state, &title) {
-            Ok(()) => eprintln!("rubar: niri event stream closed; reconnecting"),
-            Err(error) => eprintln!("rubar: niri event stream failed: {error}"),
+            Ok(()) => tracing::warn!("rubar: niri event stream closed; reconnecting"),
+            Err(error) => tracing::warn!("rubar: niri event stream failed: {error}"),
         }
         thread::sleep(reconnect_interval);
     }
@@ -132,7 +132,7 @@ fn stream_events(
                         *current = Some(next);
                     }
                 }
-                Err(error) => eprintln!("rubar: could not parse niri workspaces: {error}"),
+                Err(error) => tracing::warn!("rubar: could not parse niri workspaces: {error}"),
             }
         }
         update_title(&value, title);

@@ -275,7 +275,7 @@ fn ipc_event_loop(
                                                 *target = value;
                                             }
                                         }
-                                        Err(error) => eprintln!(
+                                        Err(error) => tracing::warn!(
                                             "rubar: could not read {wm_name} focused window: {error}"
                                         ),
                                     }
@@ -294,14 +294,18 @@ fn ipc_event_loop(
                             }
                             Ok(_) => {}
                             Err(error) => {
-                                eprintln!("rubar: {wm_name} event socket read failed: {error}");
+                                tracing::warn!(
+                                    "rubar: {wm_name} event socket read failed: {error}"
+                                );
                                 break;
                             }
                         }
                     }
                 }
             }
-            Err(error) => eprintln!("rubar: could not connect to {wm_name} event socket: {error}"),
+            Err(error) => {
+                tracing::warn!("rubar: could not connect to {wm_name} event socket: {error}")
+            }
         }
         thread::sleep(reconnect_interval);
     }

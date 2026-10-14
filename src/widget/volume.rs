@@ -94,7 +94,7 @@ impl Widget for Volume {
             Ok(()) => {
                 self.state = Some(state);
             }
-            Err(error) => eprintln!("rubar: could not set mute: {error}"),
+            Err(error) => tracing::warn!("rubar: could not set mute: {error}"),
         }
     }
 
@@ -140,7 +140,7 @@ impl Widget for Volume {
                 }
                 self.state = Some(state);
             }
-            Err(error) => eprintln!("rubar: could not set volume to {percent}%: {error}"),
+            Err(error) => tracing::warn!("rubar: could not set volume to {percent}%: {error}"),
         }
     }
 }
@@ -152,7 +152,7 @@ impl Volume {
             None => match self.provider.read() {
                 Ok(state) => Some(state),
                 Err(error) => {
-                    eprintln!("rubar: could not read volume before {action}: {error}");
+                    tracing::warn!("rubar: could not read volume before {action}: {error}");
                     None
                 }
             },

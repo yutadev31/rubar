@@ -200,21 +200,21 @@ fn event_loop(
                                         *target = value;
                                     }
                                 }
-                                Err(error) => eprintln!(
+                                Err(error) => tracing::warn!(
                                     "rubar: could not read Hyprland focused window: {error}"
                                 ),
                             }
                         }
                         Ok(_) => {}
                         Err(error) => {
-                            eprintln!("rubar: Hyprland event socket read failed: {error}");
+                            tracing::warn!("rubar: Hyprland event socket read failed: {error}");
                             break;
                         }
                     }
                 }
             }
             Err(error) => {
-                eprintln!("rubar: could not connect to Hyprland event socket: {error}");
+                tracing::warn!("rubar: could not connect to Hyprland event socket: {error}");
             }
         }
         thread::sleep(reconnect_interval);
@@ -267,7 +267,7 @@ fn update_state(
                 *state = Some(new_state);
             }
         }
-        Err(error) => eprintln!("rubar: could not read Hyprland workspace state: {error}"),
+        Err(error) => tracing::warn!("rubar: could not read Hyprland workspace state: {error}"),
     }
 }
 

@@ -4,24 +4,34 @@ version = "0.1.7"
 edition = "2024"
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = [
-  "clock",
-  "std",
-] }
+chrono = {
+  version = "0.4",
+  default-features = false,
+  features = [
+    "clock",
+    "std",
+  ]
+}
 cosmic-text = "0.19"
 dirs = "7"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "1.1"
 libpulse-binding = "2.30"
-tiny-skia = "0.12"
 png = "0.18"
 resvg = "0.48.1"
-zbus = { version = "5", default-features = false, features = [
-  "async-io",
-  "blocking-api",
-] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 shell-surface = { git = "https://github.com/yutadev31/shell-surface.git", rev = "247b682dbeff5b0b3726ec8291d6514d2a8a574a" }
+tiny-skia = "0.12"
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+zbus = {
+  version = "5",
+  default-features = false,
+  features = [
+    "async-io",
+    "blocking-api",
+  ]
+}
 
 [dev-dependencies]
 tempfile = "3"

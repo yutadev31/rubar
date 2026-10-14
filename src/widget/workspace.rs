@@ -53,7 +53,7 @@ impl Workspace {
         Self {
             format: config.format.clone(),
             active_color: parse_color(&config.active_color).unwrap_or_else(|error| {
-                eprintln!(
+                tracing::warn!(
                     "rubar: invalid workspace active_color `{}`: {error}; using #0080ff",
                     config.active_color
                 );
@@ -61,7 +61,7 @@ impl Workspace {
             }),
             active_indicator_height: config.active_indicator_height,
             urgent_color: parse_color(&config.urgent_color).unwrap_or_else(|error| {
-                eprintln!(
+                tracing::warn!(
                     "rubar: invalid workspace urgent_color `{}`: {error}; using #f7768e",
                     config.urgent_color
                 );
@@ -71,7 +71,7 @@ impl Workspace {
                 "top" => true,
                 "bottom" => false,
                 value => {
-                    eprintln!(
+                    tracing::warn!(
                         "rubar: invalid workspace active_indicator_position `{value}`; using bottom"
                     );
                     false
@@ -167,7 +167,7 @@ impl Widget for Workspace {
             self.client
                 .switch_to(target.id, Some(&target.monitor), target.local_index)
         {
-            eprintln!(
+            tracing::warn!(
                 "rubar: could not switch to workspace {}: {error}",
                 target.id
             );
