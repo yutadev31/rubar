@@ -6,8 +6,8 @@ use crate::{
     provider::wm::{self, WmClient},
     render::BarRenderer,
     widget::{
-        WidgetGroups, battery::Battery, clock::Clock, tray::Tray, volume::Volume, window::Window,
-        workspace::Workspace,
+        battery::Battery, clock::Clock, tray::Tray, volume::Volume, window::Window,
+        workspace::Workspace, WidgetGroups,
     },
 };
 use shell_surface::{
