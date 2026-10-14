@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "rubar"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "chrono",
  "cosmic-text",
@@ -1191,7 +1191,7 @@ dependencies = [
 [[package]]
 name = "shell-surface"
 version = "0.1.0"
-source = "git+https://github.com/yutadev31/shell-surface.git?rev=f1c92ce1d201699ccd5627bcaecef28fbeb0787a#f1c92ce1d201699ccd5627bcaecef28fbeb0787a"
+source = "git+https://github.com/yutadev31/shell-surface.git?rev=247b682dbeff5b0b3726ec8291d6514d2a8a574a#247b682dbeff5b0b3726ec8291d6514d2a8a574a"
 dependencies = [
  "memmap2",
  "tempfile",
