@@ -250,6 +250,7 @@ fn volume_button(text: String) -> WidgetButton {
         text: Some(text),
         icon: None,
         padding: None,
+        max_width: None,
         bold: None,
         color: None,
         background: None,

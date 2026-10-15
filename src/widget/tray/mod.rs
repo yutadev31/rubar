@@ -101,6 +101,7 @@ impl Widget for Tray {
                         text: None,
                         icon,
                         padding: Some(0),
+                        max_width: None,
                         bold: None,
                         color: None,
                         background: None,

@@ -5,6 +5,7 @@ use cosmic_text::{
     Wrap,
 };
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{color::parse_rgba, config::StyleConfig};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +40,8 @@ pub struct RenderButton {
     pub text: Option<String>,
     pub icon: Option<RenderIcon>,
     pub padding: Option<u32>,
+    /// Maximum width of the whole button, including padding, in pixels.
+    pub max_width: Option<u32>,
     pub bold: Option<bool>,
     pub color: Option<[u8; 4]>,
     pub background: Option<[u8; 4]>,
@@ -197,6 +200,7 @@ impl<'a> BarRenderer<'a> {
                     text: Some(text),
                     icon: None,
                     padding: None,
+                    max_width: None,
                     bold: None,
                     color: None,
                     background: None,
@@ -205,11 +209,33 @@ impl<'a> BarRenderer<'a> {
                 RenderContent::Buttons(buttons) => buttons,
             };
             let content_spacing = widget.content_spacing().map(|spacing| spacing as i32);
-            for (button_index, button) in buttons.into_iter().enumerate() {
-                let text_width = button.text.as_deref().map_or(0, |text| {
-                    self.measure_text(text, metrics, button.bold.unwrap_or(self.config.bold))
-                });
+            for (button_index, mut button) in buttons.into_iter().enumerate() {
                 let button_padding = button.padding.unwrap_or(self.config.item_padding) as i32;
+                let button_padding = button.max_width.map_or(button_padding, |max_width| {
+                    button_padding.min(max_width as i32 / 2)
+                });
+                let text_width = if let Some(text) = button.text.take() {
+                    let (text, width) = if let Some(max_width) = button.max_width {
+                        let available = max_width as i32 - button_padding * 2;
+                        self.fit_text(
+                            &text,
+                            available,
+                            metrics,
+                            button.bold.unwrap_or(self.config.bold),
+                        )
+                    } else {
+                        let width = self.measure_text(
+                            &text,
+                            metrics,
+                            button.bold.unwrap_or(self.config.bold),
+                        );
+                        (text, width)
+                    };
+                    button.text = Some(text);
+                    width
+                } else {
+                    0
+                };
                 items.push((
                     index,
                     button_index,
@@ -438,6 +464,45 @@ impl<'a> BarRenderer<'a> {
             .ceil() as i32
     }
 
+    fn fit_text(
+        &mut self,
+        text: &str,
+        max_width: i32,
+        metrics: &RenderMetrics,
+        bold: bool,
+    ) -> (String, i32) {
+        let full_width = self.measure_text(text, metrics, bold);
+        if full_width <= max_width {
+            return (text.to_string(), full_width);
+        }
+        let ellipsis_width = self.measure_text("…", metrics, bold);
+        if ellipsis_width > max_width {
+            return (String::new(), 0);
+        }
+
+        let boundaries: Vec<usize> = std::iter::once(0)
+            .chain(
+                text.grapheme_indices(true)
+                    .map(|(index, part)| index + part.len()),
+            )
+            .collect();
+        let mut low = 0;
+        let mut high = boundaries.len() - 1;
+        let mut width = ellipsis_width;
+        while low < high {
+            let middle = (low + high).div_ceil(2);
+            let candidate = format!("{}…", &text[..boundaries[middle]]);
+            let candidate_width = self.measure_text(&candidate, metrics, bold);
+            if candidate_width <= max_width {
+                low = middle;
+                width = candidate_width;
+            } else {
+                high = middle - 1;
+            }
+        }
+        (format!("{}…", &text[..boundaries[low]]), width)
+    }
+
     fn draw_text(
         &mut self,
         pixmap: &mut Pixmap,
@@ -656,7 +721,10 @@ impl Hitbox {
 mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use super::{BarRenderer, MouseButton, RenderContent, RenderWidget};
+    use super::{
+        BarRenderer, MouseButton, RenderButton, RenderContent, RenderMetrics, RenderWidget,
+        UnicodeSegmentation,
+    };
     use crate::config::StyleConfig;
 
     struct MonitorWidget {
@@ -680,6 +748,53 @@ mod tests {
         fn on_click(&mut self, _: MouseButton, _: usize) {
             self.clicks.set(self.clicks.get() + 1);
         }
+    }
+
+    struct LimitedWidget;
+
+    impl RenderWidget for LimitedWidget {
+        fn content(&mut self) -> RenderContent {
+            RenderContent::Buttons(vec![RenderButton {
+                text: Some("A very long window title that exceeds the limit".to_string()),
+                icon: None,
+                padding: Some(10),
+                max_width: Some(80),
+                bold: None,
+                color: None,
+                background: None,
+                indicator: None,
+            }])
+        }
+    }
+
+    #[test]
+    fn limits_button_width_and_preserves_graphemes() {
+        let config = StyleConfig::default();
+        let mut renderer = BarRenderer::new(&config).unwrap();
+        let metrics = RenderMetrics {
+            width: 800,
+            height: 30,
+            font_size: config.font_size,
+            text_color: renderer.text_color,
+        };
+        let title = "e\u{301} abcdefghijklmnopqrstuvwxyz";
+        let budget = renderer.measure_text("e\u{301} ab…", &metrics, false);
+        let (fitted, width) = renderer.fit_text(title, budget, &metrics, false);
+        assert!(fitted.ends_with('…'));
+        assert!(width <= budget);
+        let prefix = fitted.strip_suffix('…').unwrap();
+        assert!(title.starts_with(prefix));
+        assert!(
+            prefix.is_empty()
+                || title
+                    .grapheme_indices(true)
+                    .any(|(index, part)| index + part.len() == prefix.len())
+        );
+
+        let mut left: Vec<Box<dyn RenderWidget>> = vec![Box::new(LimitedWidget)];
+        renderer.render(800, 30, None, &mut left, &mut [], &mut []);
+        let hitbox = &renderer.hitboxes[&None][0];
+        assert!(hitbox.right - hitbox.left <= 80);
     }
 
     #[test]

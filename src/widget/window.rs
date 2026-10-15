@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub struct Window {
     format: String,
     padding: u32,
+    max_width: Option<u32>,
     client: Arc<dyn WmClient>,
     title: Option<String>,
 }
@@ -16,6 +17,7 @@ impl Window {
         Self {
             format: config.format.clone(),
             padding: config.padding,
+            max_width: config.max_width,
             client,
             title: None,
         }
@@ -38,6 +40,7 @@ impl Widget for Window {
             text: Some(self.format.replace("{title}", title)),
             icon: None,
             padding: Some(self.padding),
+            max_width: self.max_width,
             bold: None,
             color: None,
             background: None,

@@ -82,6 +82,8 @@ pub struct WorkspaceConfig {
 pub struct WindowConfig {
     pub format: String,
     pub padding: u32,
+    /// Maximum width of the window item, including padding, in pixels.
+    pub max_width: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -177,6 +179,7 @@ impl Default for WindowConfig {
         Self {
             format: "{title}".to_string(),
             padding: 10,
+            max_width: None,
         }
     }
 }
@@ -227,6 +230,11 @@ impl Config {
         }
         if self.volume.scroll_step == 0 || self.volume.scroll_step > 100 {
             return Err("volume.scroll_step must be between 1 and 100".to_string());
+        }
+        if let Some(max_width) = self.window.max_width
+            && !(1..=i32::MAX as u32).contains(&max_width)
+        {
+            return Err("window.max_width must be between 1 and 2147483647".to_string());
         }
         for (name, value) in [
             ("style.bar_padding", self.style.bar_padding),
@@ -316,5 +324,12 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("padding"));
+    }
+
+    #[test]
+    fn validates_window_max_width() {
+        let mut config = Config::default();
+        config.window.max_width = Some(0);
+        assert!(config.validate().unwrap_err().contains("window.max_width"));
     }
 }

@@ -111,6 +111,7 @@ impl Widget for Workspace {
                 text: Some(self.format.replace("{workspaces}", "--")),
                 icon: None,
                 padding: Some(self.padding),
+                max_width: None,
                 bold: Some(false),
                 color: None,
                 background: None,
@@ -135,6 +136,7 @@ impl Widget for Workspace {
                     ),
                     icon: None,
                     padding: Some(self.padding),
+                    max_width: None,
                     bold: Some(workspace.active),
                     color: if workspace.urgent {
                         Some(self.urgent_color)
