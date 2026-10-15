@@ -17,7 +17,7 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue, Structure, Value},
 };
 
-use crate::{config::StyleConfig, render::parse_rgba};
+use crate::{color::parse_rgba, config::StyleConfig};
 
 use super::{ITEM_INTERFACE, TrayItem};
 

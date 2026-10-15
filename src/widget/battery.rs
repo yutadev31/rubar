@@ -29,12 +29,12 @@ impl Battery {
 }
 
 impl Widget for Battery {
-    fn content(&mut self) -> WidgetContent {
+    fn poll_changed(&mut self) -> bool {
         let should_refresh = self
             .last_refresh
             .is_none_or(|last| last.elapsed() >= self.refresh_interval);
         if should_refresh {
-            self.state = match self.provider.read() {
+            let state = match self.provider.read() {
                 Ok(state) => Some(state),
                 Err(error) => {
                     tracing::warn!("rubar: could not read battery state: {error}");
@@ -42,7 +42,15 @@ impl Widget for Battery {
                 }
             };
             self.last_refresh = Some(Instant::now());
+            if self.state != state {
+                self.state = state;
+                return true;
+            }
         }
+        false
+    }
+
+    fn content(&mut self) -> WidgetContent {
         let Some(state) = self.state else {
             return WidgetContent::Buttons(Vec::new());
         };

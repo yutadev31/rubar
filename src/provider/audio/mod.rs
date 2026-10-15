@@ -53,16 +53,6 @@ pub fn create(name: &str) -> Result<Box<dyn VolumeProvider>, String> {
     }
 }
 
-pub struct Unavailable {
-    pub error: String,
-}
-
-impl VolumeProvider for Unavailable {
-    fn read(&mut self) -> Result<VolumeState, String> {
-        Err(self.error.clone())
-    }
-}
-
 pub struct PulseAudio {
     context: Rc<RefCell<pulse::context::Context>>,
     mainloop: Rc<RefCell<Mainloop>>,

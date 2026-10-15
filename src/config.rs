@@ -2,6 +2,8 @@ use std::{error::Error, fs, path::PathBuf};
 
 use serde::Deserialize;
 
+use crate::color::parse_rgba;
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -179,19 +181,104 @@ impl Config {
     pub fn load() -> Result<Self, Box<dyn Error>> {
         let Some(path) = config_path() else {
             tracing::debug!("configuration directory unavailable; using defaults");
-            return Ok(Self::default());
+            let config = Self::default();
+            config.validate()?;
+            return Ok(config);
         };
         if !path.exists() {
             tracing::debug!(path = %path.display(), "configuration file not found; using defaults");
-            return Ok(Self::default());
+            let config = Self::default();
+            config.validate()?;
+            return Ok(config);
         }
         tracing::debug!(path = %path.display(), "loading configuration");
-        let config = toml::from_str(&fs::read_to_string(&path)?)?;
+        let config: Self = toml::from_str(&fs::read_to_string(&path)?)?;
+        config
+            .validate()
+            .map_err(|error| format!("{}: {error}", path.display()))?;
         tracing::debug!(path = %path.display(), "configuration loaded");
         Ok(config)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("style.colors.bg", &self.style.colors.bg),
+            ("style.colors.text", &self.style.colors.text),
+            ("workspace.active_color", &self.workspace.active_color),
+            ("workspace.urgent_color", &self.workspace.urgent_color),
+        ] {
+            parse_rgba(value).map_err(|error| format!("{name}: {error}"))?;
+        }
+        if !(1..=4096).contains(&self.style.height) {
+            return Err("style.height must be between 1 and 4096".to_string());
+        }
+        if !self.style.font_size.is_finite() || self.style.font_size <= 0.0 {
+            return Err("style.font_size must be a finite positive number".to_string());
+        }
+        if self.tray.icon_size == 0 {
+            return Err("tray.icon_size must be greater than zero".to_string());
+        }
+        if self.battery.refresh_seconds == 0 {
+            return Err("battery.refresh_seconds must be greater than zero".to_string());
+        }
+        for (name, value) in [
+            ("style.padding", self.style.padding),
+            ("style.spacing", self.style.spacing),
+            ("style.button_spacing", self.style.button_spacing),
+            ("workspace.padding", self.workspace.padding),
+            ("workspace.spacing", self.workspace.spacing),
+            ("window.padding", self.window.padding),
+        ] {
+            if value > i32::MAX as u32 {
+                return Err(format!("{name} exceeds the supported range"));
+            }
+        }
+        if !matches!(
+            self.workspace.active_indicator_position.as_str(),
+            "top" | "bottom"
+        ) {
+            return Err(
+                "workspace.active_indicator_position must be `top` or `bottom`".to_string(),
+            );
+        }
+        for (group, names) in [
+            ("left", &self.modules.left),
+            ("center", &self.modules.center),
+            ("right", &self.modules.right),
+        ] {
+            for name in names {
+                if !matches!(
+                    name.as_str(),
+                    "clock" | "battery" | "volume" | "workspace" | "window" | "tray"
+                ) {
+                    return Err(format!("modules.{group}: unknown module `{name}`"));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
 fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|base| base.join("rubar").join("config.toml"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn rejects_invalid_values_before_rendering() {
+        let mut config = Config::default();
+        config.style.colors.bg = "#not-a-color".to_string();
+        assert!(config.validate().unwrap_err().contains("style.colors.bg"));
+
+        config.style.colors.bg = "#123456".to_string();
+        config.style.font_size = f32::NAN;
+        assert!(config.validate().unwrap_err().contains("style.font_size"));
+
+        config.style.font_size = 14.0;
+        config.modules.left.push("missing".to_string());
+        assert!(config.validate().unwrap_err().contains("modules.left"));
+    }
 }

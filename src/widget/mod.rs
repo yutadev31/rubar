@@ -17,6 +17,19 @@ pub struct WidgetGroups {
 }
 
 impl WidgetGroups {
+    pub fn poll_changed(&mut self) -> bool {
+        let mut changed = false;
+        for widget in self
+            .left
+            .iter_mut()
+            .chain(self.center.iter_mut())
+            .chain(self.right.iter_mut())
+        {
+            changed |= widget.poll_changed();
+        }
+        changed
+    }
+
     pub fn set_monitor_name(&mut self, monitor_name: Option<&str>) {
         for widget in self
             .left

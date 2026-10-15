@@ -31,7 +31,7 @@ const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const WATCHER_INTERFACE: &str = "org.kde.StatusNotifierWatcher";
 const ITEM_INTERFACE: &str = "org.kde.StatusNotifierItem";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrayItem {
     pub service: String,
     pub path: String,
@@ -75,10 +75,18 @@ impl Tray {
 }
 
 impl Widget for Tray {
-    fn content(&mut self) -> WidgetContent {
+    fn poll_changed(&mut self) -> bool {
+        let mut changed = false;
         while let Ok(items) = self.receiver.try_recv() {
-            self.items = items;
+            if self.items != items {
+                self.items = items;
+                changed = true;
+            }
         }
+        changed
+    }
+
+    fn content(&mut self) -> WidgetContent {
         WidgetContent::Buttons(
             self.items
                 .iter()

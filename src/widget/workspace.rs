@@ -1,8 +1,9 @@
 use crate::{
+    color::parse_rgba,
     config::WorkspaceConfig,
     provider::wm::{WmClient, WorkspaceState},
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use super::{Widget, WidgetButton, WidgetContent};
 
@@ -16,7 +17,8 @@ pub struct Workspace {
     spacing: u32,
     all_monitors: bool,
     monitor_name: Option<String>,
-    workspace_targets: Vec<WorkspaceTarget>,
+    workspace_targets: HashMap<Option<String>, Vec<WorkspaceTarget>>,
+    state: Option<WorkspaceState>,
     client: Arc<dyn WmClient>,
 }
 
@@ -52,7 +54,7 @@ impl Workspace {
     pub fn new(config: &WorkspaceConfig, client: Arc<dyn WmClient>) -> Self {
         Self {
             format: config.format.clone(),
-            active_color: parse_color(&config.active_color).unwrap_or_else(|error| {
+            active_color: parse_rgba(&config.active_color).unwrap_or_else(|error| {
                 tracing::warn!(
                     "rubar: invalid workspace active_color `{}`: {error}; using #0080ff",
                     config.active_color
@@ -60,7 +62,7 @@ impl Workspace {
                 [0, 128, 255, 255]
             }),
             active_indicator_height: config.active_indicator_height,
-            urgent_color: parse_color(&config.urgent_color).unwrap_or_else(|error| {
+            urgent_color: parse_rgba(&config.urgent_color).unwrap_or_else(|error| {
                 tracing::warn!(
                     "rubar: invalid workspace urgent_color `{}`: {error}; using #f7768e",
                     config.urgent_color
@@ -81,20 +83,30 @@ impl Workspace {
             spacing: config.spacing,
             all_monitors: config.all_monitors,
             monitor_name: None,
-            workspace_targets: Vec::new(),
+            workspace_targets: HashMap::new(),
+            state: None,
             client,
         }
     }
 }
 
 impl Widget for Workspace {
+    fn poll_changed(&mut self) -> bool {
+        let state = self.client.state();
+        if self.state == state {
+            return false;
+        }
+        self.state = state;
+        true
+    }
+
     fn set_monitor_name(&mut self, monitor_name: Option<&str>) {
         self.monitor_name = monitor_name.map(str::to_owned);
     }
 
     fn content(&mut self) -> WidgetContent {
-        let Some(state) = self.client.state() else {
-            self.workspace_targets.clear();
+        let Some(state) = self.state.as_ref() else {
+            self.workspace_targets.remove(&self.monitor_name);
             return WidgetContent::Buttons(vec![WidgetButton {
                 text: Some(self.format.replace("{workspaces}", "--")),
                 icon: None,
@@ -107,8 +119,11 @@ impl Widget for Workspace {
         };
 
         let active_id = state.active_id.to_string();
-        let workspaces = render_workspaces(&state, self.monitor_name.as_deref(), self.all_monitors);
-        self.workspace_targets = workspaces.iter().map(WorkspaceTarget::from).collect();
+        let workspaces = render_workspaces(state, self.monitor_name.as_deref(), self.all_monitors);
+        self.workspace_targets.insert(
+            self.monitor_name.clone(),
+            workspaces.iter().map(WorkspaceTarget::from).collect(),
+        );
         WidgetContent::Buttons(
             workspaces
                 .into_iter()
@@ -152,14 +167,10 @@ impl Widget for Workspace {
             return;
         }
         let target = self
-            .client
-            .state()
-            .and_then(|state| {
-                render_workspaces(&state, self.monitor_name.as_deref(), false)
-                    .get(item)
-                    .map(WorkspaceTarget::from)
-            })
-            .or_else(|| self.workspace_targets.get(item).cloned());
+            .workspace_targets
+            .get(&self.monitor_name)
+            .and_then(|targets| targets.get(item))
+            .cloned();
         let Some(target) = target else {
             return;
         };
@@ -173,24 +184,6 @@ impl Widget for Workspace {
             );
         }
     }
-}
-
-fn parse_color(value: &str) -> Result<[u8; 4], String> {
-    let hex = value.strip_prefix('#').unwrap_or(value);
-    let (rgb, alpha) = match hex.len() {
-        6 => (hex, 255),
-        8 => (
-            &hex[..6],
-            u8::from_str_radix(&hex[6..], 16).map_err(|error| error.to_string())?,
-        ),
-        _ => return Err("expected #RRGGBB or #RRGGBBAA".to_string()),
-    };
-    Ok([
-        u8::from_str_radix(&rgb[0..2], 16).map_err(|error| error.to_string())?,
-        u8::from_str_radix(&rgb[2..4], 16).map_err(|error| error.to_string())?,
-        u8::from_str_radix(&rgb[4..6], 16).map_err(|error| error.to_string())?,
-        alpha,
-    ])
 }
 
 fn render_workspaces(

@@ -1,5 +1,5 @@
-use std::error::Error;
 use std::sync::Arc;
+use std::{collections::HashMap, error::Error};
 
 use crate::{
     config::Config,
@@ -20,6 +20,15 @@ pub struct App<'a> {
     widgets: WidgetGroups,
     _ipc_client: Arc<dyn WmClient>,
     surfaces: Vec<SurfaceConfig>,
+    revision: u64,
+    announced_revision: u64,
+    frames: HashMap<Option<String>, CachedFrame>,
+}
+
+struct CachedFrame {
+    size: Size,
+    revision: u64,
+    pixels: Vec<u8>,
 }
 
 impl<'a> App<'a> {
@@ -32,10 +41,13 @@ impl<'a> App<'a> {
             right: create_widgets(&config.modules.right, config, &ipc_client)?,
         };
         Ok(Self {
-            renderer: BarRenderer::new(&config.style),
+            renderer: BarRenderer::new(&config.style)?,
             widgets,
             _ipc_client: ipc_client,
             surfaces: vec![panel_surface_config(&config.style)],
+            revision: 0,
+            announced_revision: 0,
+            frames: HashMap::new(),
         })
     }
 
@@ -48,6 +60,12 @@ impl<'a> App<'a> {
             Box::new(shell_surface::backend::x11::X11Backend) as Box<dyn Backend>
         };
         backend.run(self)
+    }
+
+    fn poll_changes(&mut self) {
+        if self.widgets.poll_changed() {
+            self.revision = self.revision.wrapping_add(1);
+        }
     }
 }
 
@@ -62,15 +80,33 @@ impl Shell for App<'_> {
         size: Size,
         output: Option<&str>,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
+        self.poll_changes();
+        let key = output.map(str::to_owned);
+        if let Some(frame) = self.frames.get(&key)
+            && frame.size == size
+            && frame.revision == self.revision
+        {
+            return Ok(frame.pixels.clone());
+        }
         tracing::trace!(width = size.width, height = size.height, output = ?output, "rendering bar");
         self.widgets.set_monitor_name(output);
-        Ok(self.renderer.render(
+        let pixels = self.renderer.render(
             size.width.max(1),
             size.height.max(1),
+            output,
             &mut self.widgets.left,
             &mut self.widgets.center,
             &mut self.widgets.right,
-        ))
+        );
+        self.frames.insert(
+            key,
+            CachedFrame {
+                size,
+                revision: self.revision,
+                pixels: pixels.clone(),
+            },
+        );
+        Ok(pixels)
     }
 
     fn handle_event(&mut self, _surface: SurfaceId, event: InputEvent) {
@@ -90,6 +126,7 @@ impl Shell for App<'_> {
                     &mut self.widgets.center,
                     &mut self.widgets.right,
                 );
+                self.revision = self.revision.wrapping_add(1);
             }
             InputEvent::PointerScroll {
                 position,
@@ -105,19 +142,22 @@ impl Shell for App<'_> {
                     } else {
                         crate::widget::ScrollDirection::Down
                     },
+                    output.as_deref(),
                     &mut self.widgets.left,
                     &mut self.widgets.center,
                     &mut self.widgets.right,
                 );
+                self.revision = self.revision.wrapping_add(1);
             }
             _ => {}
         }
     }
 
     fn take_redraw_request(&mut self) -> bool {
-        // Widgets such as the clock and polling providers are refreshed while
-        // rendering, so keep the shell backend's frame loop alive.
-        true
+        self.poll_changes();
+        let changed = self.announced_revision != self.revision;
+        self.announced_revision = self.revision;
+        changed
     }
 }
 

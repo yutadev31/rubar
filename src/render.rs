@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::collections::HashMap;
 
 use cosmic_text::{
     Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
@@ -6,7 +6,7 @@ use cosmic_text::{
 };
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 
-use crate::config::StyleConfig;
+use crate::{color::parse_rgba, config::StyleConfig};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
@@ -54,6 +54,9 @@ pub struct RenderIcon {
 
 pub trait RenderWidget {
     fn content(&mut self) -> RenderContent;
+    fn poll_changed(&mut self) -> bool {
+        false
+    }
     fn content_spacing(&self) -> Option<u32> {
         None
     }
@@ -74,7 +77,10 @@ pub struct BarRenderer<'a> {
     font_system: FontSystem,
     swash_cache: SwashCache,
     config: &'a StyleConfig,
-    hitboxes: Vec<Hitbox>,
+    background: Color,
+    text_color: TextColor,
+    hitboxes: HashMap<Option<String>, Vec<Hitbox>>,
+    current_hitboxes: Vec<Hitbox>,
 }
 
 struct RenderMetrics {
@@ -87,39 +93,46 @@ struct RenderMetrics {
 type RenderItem = (usize, usize, RenderButton, i32, i32, Option<i32>);
 
 impl<'a> BarRenderer<'a> {
-    pub fn new(config: &'a StyleConfig) -> Self {
-        Self {
+    pub fn new(config: &'a StyleConfig) -> Result<Self, String> {
+        let [r, g, b, a] = parse_rgba(&config.colors.bg)?;
+        let text = parse_rgba(&config.colors.text)?;
+        Ok(Self {
             font_system: FontSystem::new(),
             swash_cache: SwashCache::new(),
             config,
-            hitboxes: Vec::new(),
-        }
+            background: Color::from_rgba8(r, g, b, a),
+            text_color: TextColor::rgba(text[0], text[1], text[2], text[3]),
+            hitboxes: HashMap::new(),
+            current_hitboxes: Vec::new(),
+        })
     }
 
     pub fn render(
         &mut self,
         width: u32,
         height: u32,
+        output: Option<&str>,
         left: &mut [Box<dyn RenderWidget>],
         center: &mut [Box<dyn RenderWidget>],
         right: &mut [Box<dyn RenderWidget>],
     ) -> Vec<u8> {
         let mut pixmap = Pixmap::new(width, height).expect("valid bar dimensions");
-        let background = parse_color(&self.config.colors.bg).expect("validated background color");
-        let text = parse_rgba(&self.config.colors.text).expect("validated text color");
-        let text_color = TextColor::rgba(text[0], text[1], text[2], text[3]);
         let metrics = RenderMetrics {
             width,
             height,
             font_size: self.config.font_size.max(1.0),
-            text_color,
+            text_color: self.text_color,
         };
-        pixmap.fill(background);
-        self.hitboxes.clear();
+        pixmap.fill(self.background);
+        self.current_hitboxes.clear();
 
         self.draw_group(&mut pixmap, left, &metrics, Alignment::Left);
         self.draw_group(&mut pixmap, center, &metrics, Alignment::Center);
         self.draw_group(&mut pixmap, right, &metrics, Alignment::Right);
+        self.hitboxes.insert(
+            output.map(str::to_owned),
+            std::mem::take(&mut self.current_hitboxes),
+        );
 
         // tiny-skia stores RGBA pixels. On little-endian machines Wayland's
         // ARGB8888 shm format is laid out as B,G,R,A, so convert explicitly.
@@ -139,7 +152,11 @@ impl<'a> BarRenderer<'a> {
         center: &mut [Box<dyn RenderWidget>],
         right: &mut [Box<dyn RenderWidget>],
     ) {
-        if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
+        if let Some(hitbox) = self
+            .hitboxes
+            .get(&output.map(str::to_owned))
+            .and_then(|hitboxes| hitboxes.iter().find(|hitbox| hitbox.contains(x)))
+        {
             hitbox.dispatch_click(button, output, left, center, right);
         }
     }
@@ -148,11 +165,16 @@ impl<'a> BarRenderer<'a> {
         &self,
         x: f64,
         direction: ScrollDirection,
+        output: Option<&str>,
         left: &mut [Box<dyn RenderWidget>],
         center: &mut [Box<dyn RenderWidget>],
         right: &mut [Box<dyn RenderWidget>],
     ) -> bool {
-        if let Some(hitbox) = self.hitboxes.iter().find(|hitbox| hitbox.contains(x)) {
+        if let Some(hitbox) = self
+            .hitboxes
+            .get(&output.map(str::to_owned))
+            .and_then(|hitboxes| hitboxes.iter().find(|hitbox| hitbox.contains(x)))
+        {
             hitbox.dispatch_scroll(direction, left, center, right);
             true
         } else {
@@ -254,7 +276,7 @@ impl<'a> BarRenderer<'a> {
                         metrics.height,
                         button.indicator,
                     );
-                    self.hitboxes.push(Hitbox::new(
+                    self.current_hitboxes.push(Hitbox::new(
                         cursor - button_width,
                         cursor,
                         metrics.width,
@@ -293,7 +315,7 @@ impl<'a> BarRenderer<'a> {
                         metrics.height,
                         button.indicator,
                     );
-                    self.hitboxes.push(Hitbox::new(
+                    self.current_hitboxes.push(Hitbox::new(
                         cursor,
                         cursor + button_width,
                         metrics.width,
@@ -622,22 +644,69 @@ impl Hitbox {
     }
 }
 
-fn parse_color(value: &str) -> Result<Color, Box<dyn Error>> {
-    let [r, g, b, a] = parse_rgba(value)?;
-    Ok(Color::from_rgba8(r, g, b, a))
-}
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
 
-pub(crate) fn parse_rgba(value: &str) -> Result<[u8; 4], Box<dyn Error>> {
-    let hex = value.strip_prefix('#').unwrap_or(value);
-    let (rgb, alpha) = match hex.len() {
-        6 => (hex, 255),
-        8 => (&hex[..6], u8::from_str_radix(&hex[6..], 16)?),
-        _ => return Err(format!("invalid color `{value}`; expected #RRGGBB or #RRGGBBAA").into()),
-    };
-    Ok([
-        u8::from_str_radix(&rgb[0..2], 16)?,
-        u8::from_str_radix(&rgb[2..4], 16)?,
-        u8::from_str_radix(&rgb[4..6], 16)?,
-        alpha,
-    ])
+    use super::{BarRenderer, MouseButton, RenderContent, RenderWidget};
+    use crate::config::StyleConfig;
+
+    struct MonitorWidget {
+        output: Option<String>,
+        clicks: Rc<Cell<usize>>,
+    }
+
+    impl RenderWidget for MonitorWidget {
+        fn set_monitor_name(&mut self, output: Option<&str>) {
+            self.output = output.map(str::to_owned);
+        }
+
+        fn content(&mut self) -> RenderContent {
+            if self.output.as_deref() == Some("A") {
+                RenderContent::Text("A".to_string())
+            } else {
+                RenderContent::Buttons(Vec::new())
+            }
+        }
+
+        fn on_click(&mut self, _: MouseButton, _: usize) {
+            self.clicks.set(self.clicks.get() + 1);
+        }
+    }
+
+    #[test]
+    fn keeps_hitboxes_for_each_output() {
+        let clicks = Rc::new(Cell::new(0));
+        let mut left: Vec<Box<dyn RenderWidget>> = vec![Box::new(MonitorWidget {
+            output: None,
+            clicks: Rc::clone(&clicks),
+        })];
+        let mut center = Vec::new();
+        let mut right = Vec::new();
+        let config = StyleConfig::default();
+        let mut renderer = BarRenderer::new(&config).unwrap();
+
+        left[0].set_monitor_name(Some("A"));
+        renderer.render(300, 30, Some("A"), &mut left, &mut center, &mut right);
+        left[0].set_monitor_name(Some("B"));
+        renderer.render(300, 30, Some("B"), &mut left, &mut center, &mut right);
+
+        renderer.handle_click(
+            10.0,
+            MouseButton::Left,
+            Some("A"),
+            &mut left,
+            &mut center,
+            &mut right,
+        );
+        renderer.handle_click(
+            10.0,
+            MouseButton::Left,
+            Some("B"),
+            &mut left,
+            &mut center,
+            &mut right,
+        );
+        assert_eq!(clicks.get(), 1);
+    }
 }
