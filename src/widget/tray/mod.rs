@@ -12,7 +12,7 @@ use std::{
 };
 
 use zbus::{
-    blocking::{Connection, Proxy, proxy::Builder},
+    blocking::{Connection, Proxy, connection::Builder as ConnectionBuilder, proxy::Builder},
     interface,
     message::Header,
     object_server::SignalEmitter,
@@ -300,24 +300,19 @@ impl Watcher {
 }
 
 fn run_dbus(sender: mpsc::Sender<Vec<TrayItem>>) {
-    let Ok(connection) = Connection::session()
-        .inspect_err(|error| tracing::warn!("rubar: tray session bus: {error}"))
-    else {
-        return;
-    };
-    if let Err(error) = connection.request_name(WATCHER_INTERFACE) {
-        tracing::warn!("rubar: could not own tray watcher name: {error}");
-        return;
-    }
     let items = Arc::new(Mutex::new(HashMap::new()));
     let watcher = Watcher {
         items: Arc::clone(&items),
         sender: sender.clone(),
     };
-    if let Err(error) = connection.object_server().at(WATCHER_PATH, watcher) {
-        tracing::warn!("rubar: could not register tray watcher: {error}");
+    let Ok(connection) = ConnectionBuilder::session()
+        .and_then(|builder| builder.serve_at(WATCHER_PATH, watcher))
+        .and_then(|builder| builder.name(WATCHER_INTERFACE))
+        .and_then(ConnectionBuilder::build)
+        .inspect_err(|error| tracing::warn!("rubar: tray session bus: {error}"))
+    else {
         return;
-    }
+    };
     let watcher_ref = match connection
         .object_server()
         .interface::<_, Watcher>(WATCHER_PATH)
