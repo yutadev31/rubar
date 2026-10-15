@@ -279,8 +279,10 @@ mod tests {
     fn input_only_button_controls_input() {
         let (commands, command_receiver) = mpsc::channel();
         let (state_sender, updates) = mpsc::channel();
-        let mut config = VolumeConfig::default();
-        config.scroll_step = 5;
+        let config = VolumeConfig {
+            scroll_step: 5,
+            ..Default::default()
+        };
         let mut widget = Volume {
             commands,
             updates,
