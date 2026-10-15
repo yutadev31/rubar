@@ -10,6 +10,7 @@ pub use crate::render::{
     RenderIcon as TrayIcon, RenderWidget as Widget, ScrollDirection,
 };
 
+#[derive(Default)]
 pub struct WidgetGroups {
     pub left: Vec<Box<dyn Widget>>,
     pub center: Vec<Box<dyn Widget>>,

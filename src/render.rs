@@ -7,7 +7,10 @@ use cosmic_text::{
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{color::parse_rgba, config::StyleConfig};
+use crate::{
+    color::parse_rgba,
+    config::{Config, StyleConfig},
+};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
@@ -57,6 +60,7 @@ pub struct RenderIcon {
 
 pub trait RenderWidget {
     fn content(&mut self) -> RenderContent;
+    fn reload_config(&mut self, _config: &Config) {}
     fn poll_changed(&mut self) -> bool {
         false
     }
@@ -76,10 +80,10 @@ pub trait RenderWidget {
 /// The first version only paints a solid background. `cosmic-text` is kept here
 /// rather than in the Wayland code so text layout/rasterization can later be
 /// reused by an X11 backend without changing the backend contract.
-pub struct BarRenderer<'a> {
+pub struct BarRenderer {
     font_system: FontSystem,
     swash_cache: SwashCache,
-    config: &'a StyleConfig,
+    config: StyleConfig,
     background: Color,
     text_color: TextColor,
     hitboxes: HashMap<Option<String>, Vec<Hitbox>>,
@@ -95,14 +99,14 @@ struct RenderMetrics {
 
 type RenderItem = (usize, usize, RenderButton, i32, i32, Option<i32>);
 
-impl<'a> BarRenderer<'a> {
-    pub fn new(config: &'a StyleConfig) -> Result<Self, String> {
+impl BarRenderer {
+    pub fn new(config: &StyleConfig) -> Result<Self, String> {
         let [r, g, b, a] = parse_rgba(&config.colors.bg)?;
         let text = parse_rgba(&config.colors.text)?;
         Ok(Self {
             font_system: FontSystem::new(),
             swash_cache: SwashCache::new(),
-            config,
+            config: config.clone(),
             background: Color::from_rgba8(r, g, b, a),
             text_color: TextColor::rgba(text[0], text[1], text[2], text[3]),
             hitboxes: HashMap::new(),

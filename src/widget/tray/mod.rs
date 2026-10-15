@@ -20,7 +20,7 @@ use zbus::{
 };
 
 use crate::{
-    config::StyleConfig,
+    config::{Config, StyleConfig},
     render::ClickContext,
     widget::{MouseButton, TrayIcon, Widget, WidgetButton, WidgetContent},
 };
@@ -75,6 +75,11 @@ impl Tray {
 }
 
 impl Widget for Tray {
+    fn reload_config(&mut self, config: &Config) {
+        self.icon_size = config.tray.icon_size;
+        self.style = config.style.clone();
+    }
+
     fn poll_changed(&mut self) -> bool {
         let mut changed = false;
         while let Ok(items) = self.receiver.try_recv() {

@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::color::parse_rgba;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
@@ -17,7 +17,7 @@ pub struct Config {
     pub style: StyleConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TrayConfig {
     pub icon_size: u32,
@@ -29,13 +29,13 @@ impl Default for TrayConfig {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ClockConfig {
     pub format: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ModulesConfig {
     pub left: Vec<String>,
@@ -43,7 +43,7 @@ pub struct ModulesConfig {
     pub right: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct VolumeConfig {
     pub provider: String,
@@ -54,7 +54,7 @@ pub struct VolumeConfig {
     pub format_in_muted: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct BatteryConfig {
     pub provider: String,
@@ -62,7 +62,7 @@ pub struct BatteryConfig {
     pub refresh_seconds: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WorkspaceConfig {
     pub format: String,
@@ -77,7 +77,7 @@ pub struct WorkspaceConfig {
     pub persistent_workspaces: Vec<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WindowConfig {
     pub format: String,
@@ -86,7 +86,7 @@ pub struct WindowConfig {
     pub max_width: Option<u32>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct StyleConfig {
     pub colors: ColorsConfig,
@@ -100,7 +100,7 @@ pub struct StyleConfig {
     pub item_spacing: u32,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ColorsConfig {
     pub bg: String,
@@ -199,11 +199,15 @@ impl Config {
             return Ok(config);
         }
         tracing::debug!(path = %path.display(), "loading configuration");
-        let config: Self = toml::from_str(&fs::read_to_string(&path)?)?;
-        config
-            .validate()
+        let config = Self::parse(&fs::read_to_string(&path)?)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         tracing::debug!(path = %path.display(), "configuration loaded");
+        Ok(config)
+    }
+
+    pub fn parse(contents: &str) -> Result<Self, Box<dyn Error>> {
+        let config: Self = toml::from_str(contents)?;
+        config.validate()?;
         Ok(config)
     }
 
@@ -275,7 +279,7 @@ impl Config {
     }
 }
 
-fn config_path() -> Option<PathBuf> {
+pub fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|base| base.join("rubar").join("config.toml"))
 }
 
