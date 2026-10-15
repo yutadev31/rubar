@@ -12,6 +12,7 @@ pub struct Volume {
     format_out_muted: String,
     format_in: String,
     format_in_muted: String,
+    scroll_step: u8,
     state: Option<provider::VolumeState>,
     visible_channels: Vec<bool>,
     revision: u64,
@@ -50,6 +51,7 @@ impl Volume {
             format_out_muted: config.format_out_muted.clone(),
             format_in: config.format_in.clone(),
             format_in_muted: config.format_in_muted.clone(),
+            scroll_step: config.scroll_step,
             state: None,
             visible_channels: Vec::new(),
             revision: 0,
@@ -146,8 +148,8 @@ impl Widget for Volume {
             return;
         };
         let change = match direction {
-            ScrollDirection::Up => 1,
-            ScrollDirection::Down => -1,
+            ScrollDirection::Up => i16::from(self.scroll_step),
+            ScrollDirection::Down => -i16::from(self.scroll_step),
         };
         channel.percent = (channel.percent as i16 + change).clamp(0, 100) as u8;
         let revision = self.revision.wrapping_add(1);
@@ -276,7 +278,8 @@ mod tests {
     fn input_only_button_controls_input() {
         let (commands, command_receiver) = mpsc::channel();
         let (state_sender, updates) = mpsc::channel();
-        let config = VolumeConfig::default();
+        let mut config = VolumeConfig::default();
+        config.scroll_step = 5;
         let mut widget = Volume {
             commands,
             updates,
@@ -284,6 +287,7 @@ mod tests {
             format_out_muted: config.format_out_muted,
             format_in: config.format_in,
             format_in_muted: config.format_in_muted,
+            scroll_step: config.scroll_step,
             state: None,
             visible_channels: Vec::new(),
             revision: 0,
@@ -307,7 +311,7 @@ mod tests {
             command_receiver.try_recv().unwrap().action,
             VolumeAction::SetPercent {
                 input: true,
-                percent: 41
+                percent: 45
             }
         ));
         state_sender
@@ -323,6 +327,6 @@ mod tests {
             })
             .unwrap();
         assert!(!widget.poll_changed());
-        assert_eq!(widget.state.unwrap().input.unwrap().percent, 41);
+        assert_eq!(widget.state.unwrap().input.unwrap().percent, 45);
     }
 }

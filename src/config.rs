@@ -47,6 +47,7 @@ pub struct ModulesConfig {
 #[serde(default)]
 pub struct VolumeConfig {
     pub provider: String,
+    pub scroll_step: u8,
     pub format_out: String,
     pub format_out_muted: String,
     pub format_in: String,
@@ -84,16 +85,17 @@ pub struct WindowConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct StyleConfig {
     pub colors: ColorsConfig,
     pub height: u32,
     pub font_size: f32,
     pub font_family: String,
     pub bold: bool,
-    pub padding: u32,
-    pub spacing: u32,
-    pub button_spacing: u32,
+    pub bar_padding: u32,
+    pub item_padding: u32,
+    pub module_spacing: u32,
+    pub item_spacing: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -111,9 +113,10 @@ impl Default for StyleConfig {
             font_size: 14.0,
             font_family: String::new(),
             bold: false,
-            padding: 6,
-            spacing: 12,
-            button_spacing: 4,
+            bar_padding: 6,
+            item_padding: 6,
+            module_spacing: 12,
+            item_spacing: 4,
         }
     }
 }
@@ -131,6 +134,7 @@ impl Default for VolumeConfig {
     fn default() -> Self {
         Self {
             provider: "pulseaudio".to_string(),
+            scroll_step: 1,
             format_out: "{volume}% 󰕾".to_string(),
             format_out_muted: "󰖁".to_string(),
             format_in: "{volume}% 󰍬".to_string(),
@@ -221,10 +225,14 @@ impl Config {
         if self.battery.refresh_seconds == 0 {
             return Err("battery.refresh_seconds must be greater than zero".to_string());
         }
+        if self.volume.scroll_step == 0 || self.volume.scroll_step > 100 {
+            return Err("volume.scroll_step must be between 1 and 100".to_string());
+        }
         for (name, value) in [
-            ("style.padding", self.style.padding),
-            ("style.spacing", self.style.spacing),
-            ("style.button_spacing", self.style.button_spacing),
+            ("style.bar_padding", self.style.bar_padding),
+            ("style.item_padding", self.style.item_padding),
+            ("style.module_spacing", self.style.module_spacing),
+            ("style.item_spacing", self.style.item_spacing),
             ("workspace.padding", self.workspace.padding),
             ("workspace.spacing", self.workspace.spacing),
             ("window.padding", self.window.padding),
@@ -280,5 +288,33 @@ mod tests {
         config.style.font_size = 14.0;
         config.modules.left.push("missing".to_string());
         assert!(config.validate().unwrap_err().contains("modules.left"));
+    }
+
+    #[test]
+    fn validates_scroll_step() {
+        let mut config = Config::default();
+        config.volume.scroll_step = 0;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("volume.scroll_step")
+        );
+
+        config.volume.scroll_step = 101;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("volume.scroll_step")
+        );
+    }
+
+    #[test]
+    fn rejects_old_style_keys() {
+        let error = toml::from_str::<Config>("[style]\npadding = 8")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("padding"));
     }
 }
