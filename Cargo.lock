@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "rubar"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "cosmic-text",
