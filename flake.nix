@@ -54,7 +54,7 @@
             lockFile = ./Cargo.lock;
 
             outputHashes = {
-              "shell-surface-0.1.0" = "sha256-QUrfvyEuGP1zTxIV6EE+gTD4cu3Y5dl5EApJmJjKx9s=";
+              "shell-surface-0.1.0" = "sha256-F09JrQE40C3b/MxCesGQK8lOxyiX2cgE/GIfsh3g6ss=";
             };
           };
 
