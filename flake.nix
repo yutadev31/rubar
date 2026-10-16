@@ -59,6 +59,14 @@
           };
 
           inherit nativeBuildInputs buildInputs;
+
+          preCheck = ''
+            export FONTCONFIG_FILE="${
+              pkgs.makeFontsConf {
+                fontDirectories = [ pkgs.dejavu_fonts ];
+              }
+            }"
+          '';
         };
       in
       {
