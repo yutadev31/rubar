@@ -12,8 +12,8 @@ use crate::{
     provider::wm::{self, WmClient},
     render::BarRenderer,
     widget::{
-        WidgetGroups, battery::Battery, clock::Clock, tray::Tray, volume::Volume, window::Window,
-        workspace::Workspace,
+        WidgetGroups, battery::Battery, clock::Clock, memory::Memory, tray::Tray, volume::Volume,
+        window::Window, workspace::Workspace,
     },
 };
 use shell_surface::{
@@ -345,6 +345,7 @@ fn reusable(name: &str, old: &Config, new: &Config) -> bool {
     match name {
         "clock" => old.clock == new.clock,
         "battery" => old.battery == new.battery,
+        "memory" => old.memory == new.memory,
         "volume" => old.volume == new.volume,
         "workspace" => old.workspace == new.workspace,
         "window" => {
@@ -364,6 +365,7 @@ fn create_widget(
     match name {
         "clock" => Ok(Box::new(Clock::new(&config.clock)) as Box<dyn crate::widget::Widget>),
         "battery" => Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>),
+        "memory" => Ok(Box::new(Memory::new(&config.memory)) as Box<dyn crate::widget::Widget>),
         "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
         "workspace" => Ok(
             Box::new(Workspace::new(&config.workspace, Arc::clone(ipc_client)))

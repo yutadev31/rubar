@@ -3,12 +3,14 @@ use std::{error::Error, fs, path::PathBuf};
 use serde::Deserialize;
 
 use crate::color::parse_rgba;
+use crate::provider::memory;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
     pub clock: ClockConfig,
     pub battery: BatteryConfig,
+    pub memory: MemoryConfig,
     pub modules: ModulesConfig,
     pub volume: VolumeConfig,
     pub workspace: WorkspaceConfig,
@@ -57,6 +59,14 @@ pub struct VolumeConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct BatteryConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MemoryConfig {
     pub provider: String,
     pub format: String,
     pub refresh_seconds: u64,
@@ -155,6 +165,16 @@ impl Default for BatteryConfig {
     }
 }
 
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            provider: "auto".to_string(),
+            format: "{used}/{total} GiB 󰍛".to_string(),
+            refresh_seconds: 5,
+        }
+    }
+}
+
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
@@ -232,6 +252,11 @@ impl Config {
         if self.battery.refresh_seconds == 0 {
             return Err("battery.refresh_seconds must be greater than zero".to_string());
         }
+        if self.memory.refresh_seconds == 0 {
+            return Err("memory.refresh_seconds must be greater than zero".to_string());
+        }
+        memory::validate_name(&self.memory.provider)
+            .map_err(|error| format!("memory.provider: {error}"))?;
         if self.volume.scroll_step == 0 || self.volume.scroll_step > 100 {
             return Err("volume.scroll_step must be between 1 and 100".to_string());
         }
@@ -269,7 +294,7 @@ impl Config {
             for name in names {
                 if !matches!(
                     name.as_str(),
-                    "clock" | "battery" | "volume" | "workspace" | "window" | "tray"
+                    "clock" | "battery" | "memory" | "volume" | "workspace" | "window" | "tray"
                 ) {
                     return Err(format!("modules.{group}: unknown module `{name}`"));
                 }
@@ -320,6 +345,38 @@ mod tests {
                 .unwrap_err()
                 .contains("volume.scroll_step")
         );
+    }
+
+    #[test]
+    fn accepts_memory_module_and_validates_refresh_interval() {
+        let config = Config::parse(
+            "[modules]\nright = ['memory']\n[memory]\nformat = '{percent}%'\nrefresh_seconds = 2\n",
+        )
+        .unwrap();
+        assert_eq!(config.memory.format, "{percent}%");
+        assert_eq!(config.memory.provider, "auto");
+
+        let mut config = config;
+        config.memory.refresh_seconds = 0;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("memory.refresh_seconds")
+        );
+    }
+
+    #[test]
+    fn validates_memory_provider_name() {
+        assert!(Config::parse("[memory]\nprovider = 'auto'\n").is_ok());
+        #[cfg(target_os = "linux")]
+        assert!(Config::parse("[memory]\nprovider = 'linux'\n").is_ok());
+
+        let error = Config::parse("[memory]\nprovider = 'unknown'\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("memory.provider"));
+        assert!(error.contains("unknown"));
     }
 
     #[test]
