@@ -3,6 +3,7 @@ use std::{error::Error, fs, path::PathBuf};
 use serde::Deserialize;
 
 use crate::color::parse_rgba;
+use crate::provider::memory;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -254,6 +255,8 @@ impl Config {
         if self.memory.refresh_seconds == 0 {
             return Err("memory.refresh_seconds must be greater than zero".to_string());
         }
+        memory::validate_name(&self.memory.provider)
+            .map_err(|error| format!("memory.provider: {error}"))?;
         if self.volume.scroll_step == 0 || self.volume.scroll_step > 100 {
             return Err("volume.scroll_step must be between 1 and 100".to_string());
         }
@@ -361,6 +364,19 @@ mod tests {
                 .unwrap_err()
                 .contains("memory.refresh_seconds")
         );
+    }
+
+    #[test]
+    fn validates_memory_provider_name() {
+        assert!(Config::parse("[memory]\nprovider = 'auto'\n").is_ok());
+        #[cfg(target_os = "linux")]
+        assert!(Config::parse("[memory]\nprovider = 'linux'\n").is_ok());
+
+        let error = Config::parse("[memory]\nprovider = 'unknown'\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("memory.provider"));
+        assert!(error.contains("unknown"));
     }
 
     #[test]

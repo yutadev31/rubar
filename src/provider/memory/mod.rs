@@ -43,12 +43,32 @@ pub trait MemoryProvider {
     fn read(&mut self) -> Result<MemoryState, String>;
 }
 
+enum ProviderKind {
+    Auto,
+    #[cfg(target_os = "linux")]
+    Linux,
+}
+
+impl ProviderKind {
+    fn parse(name: &str) -> Result<Self, String> {
+        match name {
+            "auto" => Ok(Self::Auto),
+            #[cfg(target_os = "linux")]
+            "linux" => Ok(Self::Linux),
+            _ => Err(format!("unknown memory provider `{name}`")),
+        }
+    }
+}
+
+pub fn validate_name(name: &str) -> Result<(), String> {
+    ProviderKind::parse(name).map(|_| ())
+}
+
 pub fn create(name: &str) -> Result<Box<dyn MemoryProvider>, String> {
-    match name {
-        "auto" => create_auto(),
+    match ProviderKind::parse(name)? {
+        ProviderKind::Auto => create_auto(),
         #[cfg(target_os = "linux")]
-        "linux" => Ok(Box::new(linux::ProcMeminfo::new("/proc/meminfo"))),
-        _ => Err(format!("unknown memory provider `{name}`")),
+        ProviderKind::Linux => Ok(Box::new(linux::ProcMeminfo::new("/proc/meminfo"))),
     }
 }
 
