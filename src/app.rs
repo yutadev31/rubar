@@ -352,7 +352,7 @@ fn reusable(name: &str, old: &Config, new: &Config) -> bool {
             old.window == new.window
                 && old.workspace.persistent_workspaces == new.workspace.persistent_workspaces
         }
-        "tray" => true,
+        "tray" => old.tray.provider == new.tray.provider,
         _ => false,
     }
 }
@@ -375,10 +375,8 @@ fn create_widget(
             Box::new(Window::new(&config.window, Arc::clone(ipc_client)))
                 as Box<dyn crate::widget::Widget>,
         ),
-        "tray" => Ok(
-            Box::new(Tray::new(config.tray.icon_size, config.style.clone()))
-                as Box<dyn crate::widget::Widget>,
-        ),
+        "tray" => Ok(Box::new(Tray::new(&config.tray, config.style.clone())?)
+            as Box<dyn crate::widget::Widget>),
         _ => Err(format!("unknown module `{name}`").into()),
     }
 }

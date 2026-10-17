@@ -19,7 +19,7 @@ use zbus::{
 
 use crate::{color::parse_rgba, config::StyleConfig};
 
-use super::{ITEM_INTERFACE, TrayItem};
+use super::sni::{ITEM_INTERFACE, SniItem};
 
 const MENU_INTERFACE: &str = "com.canonical.dbusmenu";
 const ROW_HEIGHT: u32 = 30;
@@ -37,7 +37,7 @@ struct MenuEntry {
 }
 
 pub(super) fn open(
-    item: TrayItem,
+    item: SniItem,
     button_left: i32,
     surface_width: u32,
     output: Option<String>,
