@@ -1,5 +1,6 @@
 pub mod battery;
 pub mod clock;
+pub mod memory;
 pub mod tray;
 pub mod volume;
 pub mod window;
