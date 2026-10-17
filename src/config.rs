@@ -35,6 +35,7 @@ impl Default for TrayConfig {
 #[serde(default)]
 pub struct ClockConfig {
     pub format: Option<String>,
+    pub timezone: Option<chrono_tz::Tz>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -327,6 +328,18 @@ mod tests {
         config.style.colors.bg = "#123456".to_string();
         config.style.font_size = f32::NAN;
         assert!(config.validate().unwrap_err().contains("style.font_size"));
+    }
+
+    #[test]
+    fn parses_clock_timezone_and_rejects_unknown_zones() {
+        let config = Config::parse("[clock]\ntimezone = 'Asia/Tokyo'\n").unwrap();
+        assert_eq!(config.clock.timezone, Some(chrono_tz::Asia::Tokyo));
+        assert!(Config::default().clock.timezone.is_none());
+
+        let error = Config::parse("[clock]\ntimezone = 'Unknown/Zone'\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("timezone"));
     }
 
     #[test]
