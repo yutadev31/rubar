@@ -1,21 +1,6 @@
 use std::{fs, path::PathBuf};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MemoryState {
-    pub total_kib: u64,
-    pub available_kib: u64,
-}
-
-impl MemoryState {
-    pub fn used_kib(self) -> u64 {
-        self.total_kib - self.available_kib
-    }
-
-    pub fn percent(self) -> u64 {
-        ((u128::from(self.used_kib()) * 100 + u128::from(self.total_kib) / 2)
-            / u128::from(self.total_kib)) as u64
-    }
-}
+use super::{MemoryProvider, MemoryState};
 
 pub struct ProcMeminfo {
     path: PathBuf,
@@ -25,8 +10,10 @@ impl ProcMeminfo {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
+}
 
-    pub fn read(&self) -> Result<MemoryState, String> {
+impl MemoryProvider for ProcMeminfo {
+    fn read(&mut self) -> Result<MemoryState, String> {
         let contents = fs::read_to_string(&self.path)
             .map_err(|error| format!("could not read {}: {error}", self.path.display()))?;
         parse_meminfo(&contents)
@@ -59,16 +46,13 @@ fn parse_meminfo(contents: &str) -> Result<MemoryState, String> {
     }
     let total_kib = total.ok_or("MemTotal is missing")?;
     let available_kib = available.ok_or("MemAvailable is missing")?;
-    if total_kib == 0 {
-        return Err("MemTotal must be greater than zero".to_string());
-    }
-    if available_kib > total_kib {
-        return Err("MemAvailable exceeds MemTotal".to_string());
-    }
-    Ok(MemoryState {
-        total_kib,
-        available_kib,
-    })
+    let total_bytes = total_kib
+        .checked_mul(1024)
+        .ok_or("MemTotal exceeds the supported range")?;
+    let available_bytes = available_kib
+        .checked_mul(1024)
+        .ok_or("MemAvailable exceeds the supported range")?;
+    MemoryState::new(total_bytes, available_bytes)
 }
 
 #[cfg(test)]
@@ -76,13 +60,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn calculates_used_memory_from_available_memory() {
+    fn parses_linux_memory_values() {
         let state = parse_meminfo(
             "MemTotal:       8388608 kB\nMemFree:         1048576 kB\nMemAvailable:   6291456 kB\n",
         )
         .unwrap();
-        assert_eq!(state.used_kib(), 2097152);
-        assert_eq!(state.percent(), 25);
+        assert_eq!(state.total_bytes(), 8 * 1_073_741_824);
+        assert_eq!(state.available_bytes(), 6 * 1_073_741_824);
     }
 
     #[test]

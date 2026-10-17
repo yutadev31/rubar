@@ -66,6 +66,7 @@ pub struct BatteryConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct MemoryConfig {
+    pub provider: String,
     pub format: String,
     pub refresh_seconds: u64,
 }
@@ -166,6 +167,7 @@ impl Default for BatteryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            provider: "auto".to_string(),
             format: "{used}/{total} GiB 󰍛".to_string(),
             refresh_seconds: 5,
         }
@@ -349,6 +351,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.memory.format, "{percent}%");
+        assert_eq!(config.memory.provider, "auto");
 
         let mut config = config;
         config.memory.refresh_seconds = 0;

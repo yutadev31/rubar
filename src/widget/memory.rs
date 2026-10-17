@@ -2,13 +2,13 @@ use std::time::{Duration, Instant};
 
 use crate::{
     config::MemoryConfig,
-    provider::memory::{MemoryState, ProcMeminfo},
+    provider::memory::{self, MemoryState},
 };
 
 use super::{Widget, WidgetContent};
 
 pub struct Memory {
-    provider: ProcMeminfo,
+    provider: Box<dyn memory::MemoryProvider>,
     format: String,
     refresh_interval: Duration,
     last_refresh: Option<Instant>,
@@ -17,8 +17,11 @@ pub struct Memory {
 
 impl Memory {
     pub fn new(config: &MemoryConfig) -> Self {
+        let provider = memory::create(&config.provider).unwrap_or_else(|error| {
+            Box::new(memory::Unavailable { error }) as Box<dyn memory::MemoryProvider>
+        });
         Self {
-            provider: ProcMeminfo::new("/proc/meminfo"),
+            provider,
             format: config.format.clone(),
             refresh_interval: Duration::from_secs(config.refresh_seconds),
             last_refresh: None,
@@ -54,12 +57,12 @@ impl Widget for Memory {
         let Some(state) = self.state else {
             return WidgetContent::Buttons(Vec::new());
         };
-        let gib = |kib| format!("{:.1}", kib as f64 / 1_048_576.0);
+        let gib = |bytes| format!("{:.1}", bytes as f64 / 1_073_741_824.0);
         WidgetContent::Text(
             self.format
-                .replace("{used}", &gib(state.used_kib()))
-                .replace("{total}", &gib(state.total_kib))
-                .replace("{available}", &gib(state.available_kib))
+                .replace("{used}", &gib(state.used_bytes()))
+                .replace("{total}", &gib(state.total_bytes()))
+                .replace("{available}", &gib(state.available_bytes()))
                 .replace("{percent}", &state.percent().to_string()),
         )
     }
