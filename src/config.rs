@@ -226,9 +226,29 @@ impl Config {
     }
 
     pub fn parse(contents: &str) -> Result<Self, Box<dyn Error>> {
-        let config: Self = toml::from_str(contents)?;
+        let mut config: Self = toml::from_str(contents)?;
+        config.ignore_unknown_modules();
         config.validate()?;
         Ok(config)
+    }
+
+    fn ignore_unknown_modules(&mut self) {
+        for (group, names) in [
+            ("left", &mut self.modules.left),
+            ("center", &mut self.modules.center),
+            ("right", &mut self.modules.right),
+        ] {
+            names.retain(|name| {
+                let known = matches!(
+                    name.as_str(),
+                    "clock" | "battery" | "memory" | "volume" | "workspace" | "window" | "tray"
+                );
+                if !known {
+                    tracing::error!("modules.{group}: unknown module `{name}`; ignoring");
+                }
+                known
+            });
+        }
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -286,20 +306,6 @@ impl Config {
                 "workspace.active_indicator_position must be `top` or `bottom`".to_string(),
             );
         }
-        for (group, names) in [
-            ("left", &self.modules.left),
-            ("center", &self.modules.center),
-            ("right", &self.modules.right),
-        ] {
-            for name in names {
-                if !matches!(
-                    name.as_str(),
-                    "clock" | "battery" | "memory" | "volume" | "workspace" | "window" | "tray"
-                ) {
-                    return Err(format!("modules.{group}: unknown module `{name}`"));
-                }
-            }
-        }
         Ok(())
     }
 }
@@ -321,10 +327,18 @@ mod tests {
         config.style.colors.bg = "#123456".to_string();
         config.style.font_size = f32::NAN;
         assert!(config.validate().unwrap_err().contains("style.font_size"));
+    }
 
-        config.style.font_size = 14.0;
-        config.modules.left.push("missing".to_string());
-        assert!(config.validate().unwrap_err().contains("modules.left"));
+    #[test]
+    fn ignores_unknown_modules_and_keeps_known_modules_in_order() {
+        let config = Config::parse(
+            "[modules]\nleft = ['clock', 'missing', 'battery']\ncenter = ['unknown']\nright = ['tray', 'clock']\n",
+        )
+        .unwrap();
+
+        assert_eq!(config.modules.left, ["clock", "battery"]);
+        assert!(config.modules.center.is_empty());
+        assert_eq!(config.modules.right, ["tray", "clock"]);
     }
 
     #[test]
