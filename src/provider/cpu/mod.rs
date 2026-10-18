@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "freebsd", test))]
+mod freebsd;
 #[cfg(target_os = "linux")]
 mod linux;
 
@@ -19,6 +21,8 @@ pub trait CpuProvider {
 
 enum ProviderKind {
     Auto,
+    #[cfg(target_os = "freebsd")]
+    FreeBsd,
     #[cfg(target_os = "linux")]
     Linux,
 }
@@ -27,6 +31,8 @@ impl ProviderKind {
     fn parse(name: &str) -> Result<Self, String> {
         match name {
             "auto" => Ok(Self::Auto),
+            #[cfg(target_os = "freebsd")]
+            "freebsd" => Ok(Self::FreeBsd),
             #[cfg(target_os = "linux")]
             "linux" => Ok(Self::Linux),
             _ => Err(format!("unknown CPU provider `{name}`")),
@@ -41,6 +47,8 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 pub fn create(name: &str) -> Result<Box<dyn CpuProvider>, String> {
     match ProviderKind::parse(name)? {
         ProviderKind::Auto => create_auto(),
+        #[cfg(target_os = "freebsd")]
+        ProviderKind::FreeBsd => Ok(Box::new(freebsd::CpTime::default())),
         #[cfg(target_os = "linux")]
         ProviderKind::Linux => Ok(Box::new(linux::ProcStat::new("/proc/stat"))),
     }
@@ -51,12 +59,17 @@ fn create_auto() -> Result<Box<dyn CpuProvider>, String> {
     create("linux")
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 fn create_auto() -> Result<Box<dyn CpuProvider>, String> {
     Err(format!(
         "no CPU provider available for {}",
         std::env::consts::OS
     ))
+}
+
+#[cfg(target_os = "freebsd")]
+fn create_auto() -> Result<Box<dyn CpuProvider>, String> {
+    create("freebsd")
 }
 
 pub struct Unavailable {
