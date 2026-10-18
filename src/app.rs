@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
     config::Config,
+    module::ModuleKind,
     provider::wm::{self, WmClient},
     render::BarRenderer,
     widget::{
@@ -214,7 +215,7 @@ impl App {
             .into_iter()
             .zip(available)
             .filter_map(|(name, widget)| {
-                (name == "tray")
+                (ModuleKind::parse(&name) == Some(ModuleKind::Tray))
                     .then_some(widget)
                     .flatten()
                     .map(|widget| (name, widget))
@@ -408,19 +409,19 @@ fn materialize_widgets(
 }
 
 fn reusable(name: &str, old: &Config, new: &Config) -> bool {
-    match name {
-        "clock" => old.clock == new.clock,
-        "battery" => old.battery == new.battery,
-        "memory" => old.memory == new.memory,
-        "cpu" => old.cpu == new.cpu,
-        "volume" => old.volume == new.volume,
-        "workspace" => old.workspace == new.workspace,
-        "window" => {
+    match ModuleKind::parse(name) {
+        Some(ModuleKind::Clock) => old.clock == new.clock,
+        Some(ModuleKind::Battery) => old.battery == new.battery,
+        Some(ModuleKind::Memory) => old.memory == new.memory,
+        Some(ModuleKind::Cpu) => old.cpu == new.cpu,
+        Some(ModuleKind::Volume) => old.volume == new.volume,
+        Some(ModuleKind::Workspace) => old.workspace == new.workspace,
+        Some(ModuleKind::Window) => {
             old.window == new.window
                 && old.workspace.persistent_workspaces == new.workspace.persistent_workspaces
         }
-        "tray" => old.tray.provider == new.tray.provider,
-        _ => false,
+        Some(ModuleKind::Tray) => old.tray.provider == new.tray.provider,
+        None => false,
     }
 }
 
@@ -429,23 +430,31 @@ fn create_widget(
     config: &Config,
     ipc_client: &Arc<dyn WmClient>,
 ) -> Result<Box<dyn crate::widget::Widget>, Box<dyn Error>> {
-    match name {
-        "clock" => Ok(Box::new(Clock::new(&config.clock)) as Box<dyn crate::widget::Widget>),
-        "battery" => Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>),
-        "memory" => Ok(Box::new(Memory::new(&config.memory)) as Box<dyn crate::widget::Widget>),
-        "cpu" => Ok(Box::new(Cpu::new(&config.cpu)) as Box<dyn crate::widget::Widget>),
-        "volume" => Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>),
-        "workspace" => Ok(
-            Box::new(Workspace::new(&config.workspace, Arc::clone(ipc_client)))
-                as Box<dyn crate::widget::Widget>,
-        ),
-        "window" => Ok(
+    let kind = ModuleKind::parse(name).ok_or_else(|| format!("unknown module `{name}`"))?;
+    match kind {
+        ModuleKind::Clock => {
+            Ok(Box::new(Clock::new(&config.clock)) as Box<dyn crate::widget::Widget>)
+        }
+        ModuleKind::Battery => {
+            Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>)
+        }
+        ModuleKind::Memory => {
+            Ok(Box::new(Memory::new(&config.memory)) as Box<dyn crate::widget::Widget>)
+        }
+        ModuleKind::Cpu => Ok(Box::new(Cpu::new(&config.cpu)) as Box<dyn crate::widget::Widget>),
+        ModuleKind::Volume => {
+            Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>)
+        }
+        ModuleKind::Workspace => Ok(Box::new(Workspace::new(
+            &config.workspace,
+            Arc::clone(ipc_client),
+        )) as Box<dyn crate::widget::Widget>),
+        ModuleKind::Window => Ok(
             Box::new(Window::new(&config.window, Arc::clone(ipc_client)))
                 as Box<dyn crate::widget::Widget>,
         ),
-        "tray" => Ok(Box::new(Tray::new(&config.tray, config.style.clone())?)
+        ModuleKind::Tray => Ok(Box::new(Tray::new(&config.tray, config.style.clone())?)
             as Box<dyn crate::widget::Widget>),
-        _ => Err(format!("unknown module `{name}`").into()),
     }
 }
 
