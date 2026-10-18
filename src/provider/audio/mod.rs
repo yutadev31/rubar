@@ -59,6 +59,26 @@ pub struct PulseAudio {
     state: Arc<Mutex<Option<VolumeState>>>,
 }
 
+#[derive(Clone, Copy)]
+enum DeviceKind {
+    Sink,
+    Source,
+}
+
+impl DeviceKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Sink => "sink",
+            Self::Source => "source",
+        }
+    }
+}
+
+enum DeviceInfo {
+    Sink(SinkInfo<'static>),
+    Source(SourceInfo<'static>),
+}
+
 fn complete_operation<C: ?Sized>(
     mainloop: &Rc<RefCell<Mainloop>>,
     operation: &Operation<C>,
@@ -143,54 +163,20 @@ impl PulseAudio {
     }
 
     fn read_default_sink(&mut self) -> Result<SinkInfo<'static>, String> {
-        self.mainloop.borrow_mut().lock();
-        let default_name = Rc::new(RefCell::new(None));
-        let default_name_ref = Rc::clone(&default_name);
-        let mainloop_ref = Rc::clone(&self.mainloop);
-        let operation = self
-            .context
-            .borrow()
-            .introspect()
-            .get_server_info(move |info| {
-                *default_name_ref.borrow_mut() =
-                    info.default_sink_name.as_ref().map(ToString::to_string);
-                unsafe { (*mainloop_ref.as_ptr()).signal(false) };
-            });
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
+        match self.read_default_device(DeviceKind::Sink)? {
+            DeviceInfo::Sink(info) => Ok(info),
+            DeviceInfo::Source(_) => unreachable!("sink lookup returned a source"),
         }
-        let Some(name) = default_name.borrow_mut().take() else {
-            self.mainloop.borrow_mut().unlock();
-            return Err("PulseAudio has no default sink".to_string());
-        };
-
-        let sink = Rc::new(RefCell::new(None));
-        let sink_ref = Rc::clone(&sink);
-        let mainloop_ref = Rc::clone(&self.mainloop);
-        let operation =
-            self.context
-                .borrow()
-                .introspect()
-                .get_sink_info_by_name(&name, move |result| {
-                    if let ListResult::Item(info) = result {
-                        *sink_ref.borrow_mut() = Some(info.to_owned());
-                    }
-                    unsafe { (*mainloop_ref.as_ptr()).signal(false) };
-                });
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
-        }
-        if operation.get_state() == pulse::operation::State::Cancelled {
-            self.mainloop.borrow_mut().unlock();
-            return Err("PulseAudio sink lookup operation was cancelled".to_string());
-        }
-        self.mainloop.borrow_mut().unlock();
-        sink.borrow_mut()
-            .take()
-            .ok_or_else(|| "could not read the default PulseAudio sink".to_string())
     }
 
     fn read_default_source(&mut self) -> Result<SourceInfo<'static>, String> {
+        match self.read_default_device(DeviceKind::Source)? {
+            DeviceInfo::Source(info) => Ok(info),
+            DeviceInfo::Sink(_) => unreachable!("source lookup returned a sink"),
+        }
+    }
+
+    fn read_default_device(&mut self, kind: DeviceKind) -> Result<DeviceInfo, String> {
         self.mainloop.borrow_mut().lock();
         let default_name = Rc::new(RefCell::new(None));
         let default_name_ref = Rc::clone(&default_name);
@@ -200,39 +186,65 @@ impl PulseAudio {
             .borrow()
             .introspect()
             .get_server_info(move |info| {
-                *default_name_ref.borrow_mut() =
-                    info.default_source_name.as_ref().map(ToString::to_string);
+                *default_name_ref.borrow_mut() = match kind {
+                    DeviceKind::Sink => info.default_sink_name.as_ref(),
+                    DeviceKind::Source => info.default_source_name.as_ref(),
+                }
+                .map(ToString::to_string);
                 unsafe { (*mainloop_ref.as_ptr()).signal(false) };
             });
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
-        }
+        complete_operation(
+            &self.mainloop,
+            &operation,
+            "PulseAudio server info operation was cancelled",
+        )?;
         let Some(name) = default_name.borrow_mut().take() else {
-            self.mainloop.borrow_mut().unlock();
-            return Err("PulseAudio has no default source".to_string());
+            return Err(format!("PulseAudio has no default {}", kind.name()));
         };
 
-        let source = Rc::new(RefCell::new(None));
-        let source_ref = Rc::clone(&source);
+        let device = Rc::new(RefCell::new(None));
         let mainloop_ref = Rc::clone(&self.mainloop);
-        let operation =
-            self.context
-                .borrow()
-                .introspect()
-                .get_source_info_by_name(&name, move |result| {
-                    if let ListResult::Item(info) = result {
-                        *source_ref.borrow_mut() = Some(info.to_owned());
-                    }
-                    unsafe { (*mainloop_ref.as_ptr()).signal(false) };
-                });
-        while operation.get_state() != pulse::operation::State::Done {
-            self.mainloop.borrow_mut().wait();
+        self.mainloop.borrow_mut().lock();
+        match kind {
+            DeviceKind::Sink => {
+                let device_ref = Rc::clone(&device);
+                let operation = self.context.borrow().introspect().get_sink_info_by_name(
+                    &name,
+                    move |result| {
+                        if let ListResult::Item(info) = result {
+                            *device_ref.borrow_mut() = Some(DeviceInfo::Sink(info.to_owned()));
+                        }
+                        unsafe { (*mainloop_ref.as_ptr()).signal(false) };
+                    },
+                );
+                complete_operation(
+                    &self.mainloop,
+                    &operation,
+                    "PulseAudio sink lookup operation was cancelled",
+                )?;
+            }
+            DeviceKind::Source => {
+                let device_ref = Rc::clone(&device);
+                let operation = self.context.borrow().introspect().get_source_info_by_name(
+                    &name,
+                    move |result| {
+                        if let ListResult::Item(info) = result {
+                            *device_ref.borrow_mut() = Some(DeviceInfo::Source(info.to_owned()));
+                        }
+                        unsafe { (*mainloop_ref.as_ptr()).signal(false) };
+                    },
+                );
+                complete_operation(
+                    &self.mainloop,
+                    &operation,
+                    "PulseAudio source lookup operation was cancelled",
+                )?;
+            }
         }
-        self.mainloop.borrow_mut().unlock();
-        source
+        device
             .borrow_mut()
             .take()
-            .ok_or_else(|| "could not read the default PulseAudio source".to_string())
+            .ok_or_else(|| format!("could not read the default PulseAudio {}", kind.name()))
     }
 }
 
