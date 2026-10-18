@@ -7,7 +7,10 @@ use std::{
     mem::MaybeUninit,
     os::{fd::OwnedFd, unix::net::UnixStream},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -82,7 +85,10 @@ impl I3Client {
         let shared_state = Arc::clone(&state);
         let shared_names = Arc::clone(&workspace_names);
         let event_persistent_workspaces = persistent_workspaces.clone();
-        let event_title = Arc::clone(&title);
+        let (title_requests, title_events) = sync_channel(1);
+        let title_socket = socket.clone();
+        let shared_title = Arc::clone(&title);
+        thread::spawn(move || title_loop(wm_name, title_socket, shared_title, title_events));
         let event_wm_name = wm_name;
         thread::spawn(move || {
             ipc_event_loop(
@@ -91,7 +97,7 @@ impl I3Client {
                 shared_state,
                 shared_names,
                 event_persistent_workspaces,
-                event_title,
+                title_requests,
                 reconnect_interval,
             )
         });
@@ -298,7 +304,7 @@ fn ipc_event_loop(
     state: Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: Arc<RwLock<HashMap<i64, String>>>,
     persistent_workspaces: Vec<String>,
-    title: Arc<RwLock<Option<String>>>,
+    title_requests: SyncSender<()>,
     reconnect_interval: Duration,
 ) {
     loop {
@@ -316,19 +322,7 @@ fn ipc_event_loop(
                     );
                 } else {
                     tracing::debug!(window_manager = wm_name, "window manager IPC ready");
-                    match read_window_title(&socket) {
-                        Ok(value) => match title.write() {
-                            Ok(mut target) => *target = value,
-                            Err(error) => tracing::error!(
-                                "rubar: could not update {wm_name} window title: {error}"
-                            ),
-                        },
-                        Err(error) => {
-                            tracing::warn!(
-                                "rubar: could not read {wm_name} focused window: {error}"
-                            )
-                        }
-                    }
+                    request_title_update(wm_name, &title_requests);
                     // Reconcile state even if an event is missed or a snapshot fails.
                     let mut next_refresh = Instant::now() + STATE_REFRESH_INTERVAL;
                     loop {
@@ -365,17 +359,7 @@ fn ipc_event_loop(
                                     next_refresh = Instant::now() + interval;
                                 }
                                 if event_type == 3 || event_type == 0 {
-                                    match read_window_title(&socket) {
-                                        Ok(value) => match title.write() {
-                                            Ok(mut target) => *target = value,
-                                            Err(error) => tracing::error!(
-                                                "rubar: could not update {wm_name} window title: {error}"
-                                            ),
-                                        },
-                                        Err(error) => tracing::warn!(
-                                            "rubar: could not read {wm_name} focused window: {error}"
-                                        ),
-                                    }
+                                    request_title_update(wm_name, &title_requests);
                                 }
                             }
                             Ok(_) => {}
@@ -394,6 +378,36 @@ fn ipc_event_loop(
             }
         }
         thread::sleep(reconnect_interval);
+    }
+}
+
+fn request_title_update(wm_name: &str, requests: &SyncSender<()>) {
+    match requests.try_send(()) {
+        Ok(()) | Err(TrySendError::Full(())) => {}
+        Err(TrySendError::Disconnected(())) => {
+            tracing::error!("rubar: {wm_name} window title worker stopped");
+        }
+    }
+}
+
+fn title_loop(
+    wm_name: &str,
+    socket: PathBuf,
+    title: Arc<RwLock<Option<String>>>,
+    requests: Receiver<()>,
+) {
+    while requests.recv().is_ok() {
+        // One lookup observes the latest title for all pending events.
+        while requests.try_recv().is_ok() {}
+        match read_window_title(&socket) {
+            Ok(value) => match title.write() {
+                Ok(mut target) => *target = value,
+                Err(error) => {
+                    tracing::error!("rubar: could not update {wm_name} window title: {error}")
+                }
+            },
+            Err(error) => tracing::warn!("rubar: could not read {wm_name} focused window: {error}"),
+        }
     }
 }
 
@@ -549,11 +563,17 @@ fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{IpcWorkspace, ipc_request_with_timeout, read_event_until, workspace_snapshot};
+    use super::{
+        IpcWorkspace, STATE_REFRESH_INTERVAL, ipc_read_message, ipc_request_with_timeout,
+        ipc_write_message, read_event_until, refresh_ipc_state, request_title_update, title_loop,
+        workspace_snapshot,
+    };
     use socket2::{Domain, SockAddr, Socket, Type};
     use std::{
+        collections::HashMap,
         io::{self, Write},
         os::unix::net::{UnixListener, UnixStream},
+        sync::{Arc, RwLock, mpsc::sync_channel},
         thread,
         time::{Duration, Instant},
     };
@@ -624,6 +644,44 @@ mod tests {
             .unwrap();
         assert_eq!(message_type, 0x8000_0000);
         assert_eq!(payload, b"{}");
+    }
+
+    #[test]
+    fn slow_title_reply_does_not_delay_workspace_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("i3.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let title = Arc::new(RwLock::new(None));
+        let (requests, events) = sync_channel(1);
+        let title_socket = socket.clone();
+        let worker = thread::spawn(move || title_loop("i3", title_socket, title, events));
+        request_title_update("i3", &requests);
+
+        let (mut stalled_title_reply, _) = listener.accept().unwrap();
+        assert_eq!(ipc_read_message(&mut stalled_title_reply).unwrap().0, 4);
+        let responder = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(ipc_read_message(&mut stream).unwrap().0, 1);
+            ipc_write_message(
+                &mut stream,
+                1,
+                br#"[{"name":"1","output":"HDMI-1","focused":true,"visible":true}]"#,
+            )
+            .unwrap();
+        });
+
+        let state = Arc::new(RwLock::new(None));
+        let names = Arc::new(RwLock::new(HashMap::new()));
+        let start = Instant::now();
+        let interval = refresh_ipc_state("i3", &socket, &state, &names, &[]);
+        assert_eq!(interval, STATE_REFRESH_INTERVAL);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert_eq!(state.read().unwrap().as_ref().unwrap().active_id, 1);
+
+        drop(stalled_title_reply);
+        drop(requests);
+        responder.join().unwrap();
+        worker.join().unwrap();
     }
 
     #[test]
