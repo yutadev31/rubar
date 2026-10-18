@@ -20,6 +20,7 @@ use shell_surface::{
     Anchors, Backend, InputEvent, MouseButton as SurfaceMouseButton, OutputSelection, Shell, Size,
     SurfaceConfig, SurfaceId,
 };
+use x11rb::connection::Connection;
 
 pub struct App {
     renderer: BarRenderer,
@@ -35,6 +36,7 @@ pub struct App {
     restart_backend: bool,
     active_config: Config,
     dormant_trays: Vec<(String, Box<dyn crate::widget::Widget>)>,
+    x11_width: Option<u32>,
 }
 
 struct CachedFrame {
@@ -60,7 +62,7 @@ impl App {
             renderer: BarRenderer::new(&config.style)?,
             widgets,
             _ipc_client: ipc_client,
-            surfaces: vec![panel_surface_config(&config.style)],
+            surfaces: vec![panel_surface_config(&config.style, None)],
             revision: 0,
             announced_revision: 0,
             frames: HashMap::new(),
@@ -70,6 +72,7 @@ impl App {
             restart_backend: false,
             active_config: config.clone(),
             dormant_trays: Vec::new(),
+            x11_width: None,
         })
     }
 
@@ -79,6 +82,14 @@ impl App {
             Box::new(shell_surface::backend::wayland::WaylandBackend) as Box<dyn Backend>
         } else {
             tracing::debug!("starting X11 backend");
+            // Unlike layer-shell, the X11 backend creates a 1px window for a zero width.
+            let (connection, screen_number) = x11rb::connect(None)?;
+            let width = u32::from(connection.setup().roots[screen_number].width_in_pixels);
+            self.x11_width = Some(width);
+            self.surfaces = vec![panel_surface_config(
+                &self.active_config.style,
+                self.x11_width,
+            )];
             Box::new(shell_surface::backend::x11::X11Backend) as Box<dyn Backend>
         };
         loop {
@@ -177,7 +188,7 @@ impl App {
                 &mut available,
             )?,
         };
-        let surfaces = vec![panel_surface_config(&config.style)];
+        let surfaces = vec![panel_surface_config(&config.style, self.x11_width)];
         self.restart_backend = self.surfaces[0].size.height != surfaces[0].size.height;
         self.renderer = renderer;
         self._ipc_client = ipc_client;
@@ -290,8 +301,14 @@ impl Shell for App {
     }
 }
 
-fn panel_surface_config(style: &crate::config::StyleConfig) -> SurfaceConfig {
-    let mut surface = SurfaceConfig::new("rubar", Size::new(0, style.height.max(1)));
+fn panel_surface_config(
+    style: &crate::config::StyleConfig,
+    x11_width: Option<u32>,
+) -> SurfaceConfig {
+    let mut surface = SurfaceConfig::new(
+        "rubar",
+        Size::new(x11_width.unwrap_or(0), style.height.max(1)),
+    );
     surface.anchors = Anchors::TOP | Anchors::LEFT | Anchors::RIGHT;
     surface.exclusive_zone = style.height.max(1) as i32;
     surface.output = OutputSelection::All;
