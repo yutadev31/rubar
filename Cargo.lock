@@ -1174,6 +1174,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-segmentation",
+ "x11rb",
  "zbus",
 ]
 
