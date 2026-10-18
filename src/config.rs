@@ -9,30 +9,32 @@ use crate::provider::{cpu, memory, tray};
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
-    pub clock: ClockConfig,
     pub battery: BatteryConfig,
-    pub memory: MemoryConfig,
+    pub clock: ClockConfig,
     pub cpu: CpuConfig,
+    pub memory: MemoryConfig,
     pub modules: ModulesConfig,
-    pub volume: VolumeConfig,
-    pub workspace: WorkspaceConfig,
-    pub window: WindowConfig,
-    pub tray: TrayConfig,
     pub style: StyleConfig,
+    pub tray: TrayConfig,
+    pub volume: VolumeConfig,
+    pub window: WindowConfig,
+    pub workspace: WorkspaceConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
-pub struct TrayConfig {
+pub struct BatteryConfig {
     pub provider: String,
-    pub icon_size: u32,
+    pub format: String,
+    pub refresh_seconds: u64,
 }
 
-impl Default for TrayConfig {
+impl Default for BatteryConfig {
     fn default() -> Self {
         Self {
             provider: "auto".to_string(),
-            icon_size: 16,
+            format: "{percent}% 󰁹".to_string(),
+            refresh_seconds: 30,
         }
     }
 }
@@ -42,6 +44,42 @@ impl Default for TrayConfig {
 pub struct ClockConfig {
     pub format: Option<String>,
     pub timezone: Option<chrono_tz::Tz>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CpuConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+impl Default for CpuConfig {
+    fn default() -> Self {
+        Self {
+            provider: "auto".to_string(),
+            format: "{percent}% 󰻠".to_string(),
+            refresh_seconds: 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MemoryConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            provider: "auto".to_string(),
+            format: "{used}/{total} GiB 󰍛".to_string(),
+            refresh_seconds: 5,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -54,61 +92,18 @@ pub struct ModulesConfig {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
-pub struct VolumeConfig {
-    pub provider: String,
-    pub scroll_step: u8,
-    pub format_out: String,
-    pub format_out_muted: String,
-    pub format_in: String,
-    pub format_in_muted: String,
+pub struct ColorsConfig {
+    pub bg: String,
+    pub text: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct BatteryConfig {
-    pub provider: String,
-    pub format: String,
-    pub refresh_seconds: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct MemoryConfig {
-    pub provider: String,
-    pub format: String,
-    pub refresh_seconds: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct CpuConfig {
-    pub provider: String,
-    pub format: String,
-    pub refresh_seconds: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct WorkspaceConfig {
-    pub format: String,
-    pub padding: u32,
-    pub spacing: u32,
-    pub active_color: String,
-    pub urgent_color: String,
-    pub active_indicator_height: u32,
-    pub active_indicator_position: String,
-    pub all_monitors: bool,
-    /// Numeric workspaces that should always be shown by i3/Sway.
-    pub persistent_workspaces: Vec<i64>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct WindowConfig {
-    pub format: String,
-    pub padding: u32,
-    /// Maximum width of the window item, including padding, in pixels.
-    pub max_width: Option<u32>,
+impl Default for ColorsConfig {
+    fn default() -> Self {
+        Self {
+            bg: "#24283b".to_string(),
+            text: "#c0caf5".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -123,13 +118,6 @@ pub struct StyleConfig {
     pub item_padding: u32,
     pub module_spacing: u32,
     pub item_spacing: u32,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct ColorsConfig {
-    pub bg: String,
-    pub text: String,
 }
 
 impl Default for StyleConfig {
@@ -148,13 +136,31 @@ impl Default for StyleConfig {
     }
 }
 
-impl Default for ColorsConfig {
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TrayConfig {
+    pub provider: String,
+    pub icon_size: u32,
+}
+
+impl Default for TrayConfig {
     fn default() -> Self {
         Self {
-            bg: "#24283b".to_string(),
-            text: "#c0caf5".to_string(),
+            provider: "auto".to_string(),
+            icon_size: 16,
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VolumeConfig {
+    pub provider: String,
+    pub scroll_step: u8,
+    pub format_out: String,
+    pub format_out_muted: String,
+    pub format_in: String,
+    pub format_in_muted: String,
 }
 
 impl Default for VolumeConfig {
@@ -170,34 +176,38 @@ impl Default for VolumeConfig {
     }
 }
 
-impl Default for BatteryConfig {
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WindowConfig {
+    pub format: String,
+    pub padding: u32,
+    /// Maximum width of the window item, including padding, in pixels.
+    pub max_width: Option<u32>,
+}
+
+impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            provider: "auto".to_string(),
-            format: "{percent}% 󰁹".to_string(),
-            refresh_seconds: 30,
+            format: "{title}".to_string(),
+            padding: 10,
+            max_width: None,
         }
     }
 }
 
-impl Default for MemoryConfig {
-    fn default() -> Self {
-        Self {
-            provider: "auto".to_string(),
-            format: "{used}/{total} GiB 󰍛".to_string(),
-            refresh_seconds: 5,
-        }
-    }
-}
-
-impl Default for CpuConfig {
-    fn default() -> Self {
-        Self {
-            provider: "auto".to_string(),
-            format: "{percent}% 󰻠".to_string(),
-            refresh_seconds: 2,
-        }
-    }
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WorkspaceConfig {
+    pub format: String,
+    pub padding: u32,
+    pub spacing: u32,
+    pub active_color: String,
+    pub urgent_color: String,
+    pub active_indicator_height: u32,
+    pub active_indicator_position: String,
+    pub all_monitors: bool,
+    /// Numeric workspaces that should always be shown by i3/Sway.
+    pub persistent_workspaces: Vec<i64>,
 }
 
 impl Default for WorkspaceConfig {
@@ -215,16 +225,6 @@ impl Default for WorkspaceConfig {
             // who prefer the focused monitor only can still set this to false.
             all_monitors: true,
             persistent_workspaces: Vec::new(),
-        }
-    }
-}
-
-impl Default for WindowConfig {
-    fn default() -> Self {
-        Self {
-            format: "{title}".to_string(),
-            padding: 10,
-            max_width: None,
         }
     }
 }
