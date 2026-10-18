@@ -1,9 +1,10 @@
 use super::{WmClient, Workspace, WorkspaceState};
 use serde::Deserialize;
+use socket2::{Domain, SockAddr, Socket, Type};
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    os::unix::net::UnixStream,
+    os::{fd::OwnedFd, unix::net::UnixStream},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
     thread,
@@ -367,8 +368,36 @@ fn ipc_event_loop(
 }
 
 fn ipc_request(socket: &Path, message_type: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
-    let mut stream = UnixStream::connect(socket)
+    ipc_request_with_timeout(socket, message_type, payload, Duration::from_secs(2))
+}
+
+fn ipc_request_with_timeout(
+    socket: &Path,
+    message_type: u32,
+    payload: &[u8],
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    let address = SockAddr::unix(socket)
+        .map_err(|error| format!("invalid i3 IPC socket {}: {error}", socket.display()))?;
+    let connection = Socket::new(Domain::UNIX, Type::STREAM, None)
+        .map_err(|error| format!("could not create i3 IPC socket: {error}"))?;
+    connection
+        .connect_timeout(&address, timeout)
         .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
+    let descriptor: OwnedFd = connection.into();
+    let mut stream = UnixStream::from(descriptor);
+    stream.set_read_timeout(Some(timeout)).map_err(|error| {
+        format!(
+            "could not set read timeout for {}: {error}",
+            socket.display()
+        )
+    })?;
+    stream.set_write_timeout(Some(timeout)).map_err(|error| {
+        format!(
+            "could not set write timeout for {}: {error}",
+            socket.display()
+        )
+    })?;
     ipc_write_message(&mut stream, message_type, payload)?;
     ipc_read_message(&mut stream).map(|(_, payload)| payload)
 }
@@ -430,7 +459,62 @@ fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{IpcWorkspace, workspace_snapshot};
+    use super::{IpcWorkspace, ipc_request_with_timeout, workspace_snapshot};
+    use socket2::{Domain, SockAddr, Socket, Type};
+    use std::{
+        io,
+        os::unix::net::UnixListener,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn ipc_request_times_out_when_accept_queue_is_full() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("i3.sock");
+        let address = SockAddr::unix(&path).unwrap();
+        let listener = Socket::new(Domain::UNIX, Type::STREAM, None).unwrap();
+        listener.bind(&address).unwrap();
+        listener.listen(1).unwrap();
+
+        let mut pending = Vec::new();
+        let mut queue_full = false;
+        for _ in 0..16 {
+            let client = Socket::new(Domain::UNIX, Type::STREAM, None).unwrap();
+            client.set_nonblocking(true).unwrap();
+            match client.connect(&address) {
+                Ok(()) => pending.push(client),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    queue_full = true;
+                    break;
+                }
+                Err(error) => panic!("could not fill Unix socket accept queue: {error}"),
+            }
+        }
+        assert!(queue_full, "Unix socket accept queue did not fill");
+
+        let start = Instant::now();
+        let error = ipc_request_with_timeout(&path, 1, b"", Duration::from_millis(30))
+            .expect_err("a full accept queue must not block startup");
+        assert!(error.contains("could not connect"), "{error}");
+        assert!(start.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn ipc_request_times_out_when_server_does_not_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("i3.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_millis(150));
+        });
+
+        let error = ipc_request_with_timeout(&socket, 1, b"", Duration::from_millis(30))
+            .expect_err("an unresponsive IPC server must not block startup");
+        assert!(error.contains("could not read i3 IPC header"), "{error}");
+        server.join().unwrap();
+    }
 
     #[test]
     fn persistent_workspaces_keep_order_and_focused_output() {
