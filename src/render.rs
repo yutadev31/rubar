@@ -97,7 +97,25 @@ struct RenderMetrics {
     text_color: TextColor,
 }
 
-type RenderItem = (usize, usize, RenderButton, i32, i32, Option<i32>);
+struct PreparedItem {
+    widget_index: usize,
+    button_index: usize,
+    button: RenderButton,
+    text_width: i32,
+    padding: i32,
+    content_spacing: Option<i32>,
+}
+
+impl PreparedItem {
+    fn width(&self) -> i32 {
+        let icon_width = self
+            .button
+            .icon
+            .as_ref()
+            .map_or(0, |icon| icon.width as i32);
+        self.text_width.max(icon_width) + self.padding * 2
+    }
+}
 
 impl BarRenderer {
     pub fn new(config: &StyleConfig) -> Result<Self, String> {
@@ -196,6 +214,51 @@ impl BarRenderer {
         metrics: &RenderMetrics,
         alignment: Alignment,
     ) {
+        let mut items = self.prepare_items(widgets, metrics);
+        let module_spacing = self.config.module_spacing as i32;
+        let item_spacing = self.config.item_spacing as i32;
+        let total_width = items.iter().map(PreparedItem::width).sum::<i32>()
+            + items
+                .windows(2)
+                .map(|pair| {
+                    next_spacing(
+                        pair[0].widget_index,
+                        pair[1].widget_index,
+                        pair[0].content_spacing,
+                        module_spacing,
+                        item_spacing,
+                    )
+                })
+                .sum::<i32>();
+        let mut cursor = match alignment {
+            Alignment::Left => self.config.bar_padding as i32,
+            Alignment::Center => (metrics.width as i32 - total_width) / 2,
+            Alignment::Right => metrics.width.saturating_sub(self.config.bar_padding) as i32,
+        };
+
+        if matches!(alignment, Alignment::Right) {
+            items.reverse();
+        }
+        for (position, item) in items.iter().enumerate() {
+            let width = item.width();
+            let (left, right) = match alignment {
+                Alignment::Right => (cursor - width, cursor),
+                Alignment::Left | Alignment::Center => (cursor, cursor + width),
+            };
+            self.draw_prepared_item(pixmap, item, metrics, alignment, left, right);
+            let spacing = next_spacing_for_position(&items, position, module_spacing, item_spacing);
+            cursor = match alignment {
+                Alignment::Right => left - spacing,
+                Alignment::Left | Alignment::Center => right + spacing,
+            };
+        }
+    }
+
+    fn prepare_items(
+        &mut self,
+        widgets: &mut [Box<dyn RenderWidget>],
+        metrics: &RenderMetrics,
+    ) -> Vec<PreparedItem> {
         let mut items = Vec::with_capacity(widgets.len());
         for (index, widget) in widgets.iter_mut().enumerate() {
             let content = widget.content();
@@ -240,144 +303,57 @@ impl BarRenderer {
                 } else {
                     0
                 };
-                items.push((
-                    index,
+                items.push(PreparedItem {
+                    widget_index: index,
                     button_index,
                     button,
                     text_width,
-                    button_padding,
+                    padding: button_padding,
                     content_spacing,
-                ));
+                });
             }
         }
+        items
+    }
 
-        let module_spacing = self.config.module_spacing as i32;
-        let item_spacing = self.config.item_spacing as i32;
-        let total_width = items
-            .iter()
-            .map(|(_, _, button, width, padding, _)| {
-                let icon_width = button.icon.as_ref().map_or(0, |icon| icon.width as i32);
-                (*width).max(icon_width) + padding * 2
-            })
-            .sum::<i32>()
-            + items
-                .windows(2)
-                .map(|pair| {
-                    next_spacing(
-                        pair[0].0,
-                        pair[1].0,
-                        pair[0].5,
-                        module_spacing,
-                        item_spacing,
-                    )
-                })
-                .sum::<i32>();
-        let mut cursor = match alignment {
-            Alignment::Left => self.config.bar_padding as i32,
-            Alignment::Center => (metrics.width as i32 - total_width) / 2,
-            Alignment::Right => metrics.width.saturating_sub(self.config.bar_padding) as i32,
-        };
-
-        let items = if matches!(alignment, Alignment::Right) {
-            items.into_iter().rev().collect::<Vec<_>>()
-        } else {
-            items
-        };
-        for (position, (index, button_index, button, text_width, button_padding, _)) in
-            items.iter().enumerate()
-        {
-            let index = *index;
-            let button_index = *button_index;
-            let text_width = *text_width;
-            let button_padding = *button_padding;
-            let icon_width = button.icon.as_ref().map_or(0, |icon| icon.width as i32);
-            let content_width = text_width.max(icon_width);
-            let button_width = content_width + button_padding * 2;
-            let bold = button.bold.unwrap_or(self.config.bold);
-            let button_color = button
-                .color
-                .map(|[r, g, b, a]| TextColor::rgba(r, g, b, a))
-                .unwrap_or(metrics.text_color);
-            match alignment {
-                Alignment::Right => {
-                    self.draw_button_background(
-                        pixmap,
-                        cursor - button_width,
-                        cursor,
-                        metrics.height,
-                        button.background,
-                    );
-                    self.draw_button_indicator(
-                        pixmap,
-                        cursor - button_width,
-                        cursor,
-                        metrics.height,
-                        button.indicator,
-                    );
-                    self.current_hitboxes.push(Hitbox::new(
-                        cursor - button_width,
-                        cursor,
-                        metrics.width,
-                        alignment,
-                        index,
-                        button_index,
-                    ));
-                    if let Some(text) = button.text.as_deref() {
-                        self.draw_text(
-                            pixmap,
-                            text,
-                            cursor - button_padding,
-                            metrics,
-                            button_color,
-                            bold,
-                        );
-                    }
-                    if let Some(icon) = button.icon.as_ref() {
-                        self.draw_icon(pixmap, icon, cursor - button_padding - icon_width);
-                    }
-                    cursor -= button_width
-                        + next_spacing_for_position(&items, position, module_spacing, item_spacing);
-                }
-                Alignment::Left | Alignment::Center => {
-                    self.draw_button_background(
-                        pixmap,
-                        cursor,
-                        cursor + button_width,
-                        metrics.height,
-                        button.background,
-                    );
-                    self.draw_button_indicator(
-                        pixmap,
-                        cursor,
-                        cursor + button_width,
-                        metrics.height,
-                        button.indicator,
-                    );
-                    self.current_hitboxes.push(Hitbox::new(
-                        cursor,
-                        cursor + button_width,
-                        metrics.width,
-                        alignment,
-                        index,
-                        button_index,
-                    ));
-                    if let Some(text) = button.text.as_deref() {
-                        self.draw_text(
-                            pixmap,
-                            text,
-                            cursor + button_padding + text_width,
-                            metrics,
-                            button_color,
-                            bold,
-                        );
-                    }
-                    if let Some(icon) = button.icon.as_ref() {
-                        self.draw_icon(pixmap, icon, cursor + button_padding);
-                    }
-                    cursor += button_width
-                        + next_spacing_for_position(&items, position, module_spacing, item_spacing);
-                }
-            }
+    fn draw_prepared_item(
+        &mut self,
+        pixmap: &mut Pixmap,
+        item: &PreparedItem,
+        metrics: &RenderMetrics,
+        alignment: Alignment,
+        left: i32,
+        right: i32,
+    ) {
+        let button = &item.button;
+        let bold = button.bold.unwrap_or(self.config.bold);
+        let button_color = button
+            .color
+            .map(|[r, g, b, a]| TextColor::rgba(r, g, b, a))
+            .unwrap_or(metrics.text_color);
+        self.draw_button_background(pixmap, left, right, metrics.height, button.background);
+        self.draw_button_indicator(pixmap, left, right, metrics.height, button.indicator);
+        self.current_hitboxes.push(Hitbox::new(
+            left,
+            right,
+            metrics.width,
+            alignment,
+            item.widget_index,
+            item.button_index,
+        ));
+        if let Some(text) = button.text.as_deref() {
+            let text_right = match alignment {
+                Alignment::Right => right - item.padding,
+                Alignment::Left | Alignment::Center => left + item.padding + item.text_width,
+            };
+            self.draw_text(pixmap, text, text_right, metrics, button_color, bold);
+        }
+        if let Some(icon) = button.icon.as_ref() {
+            let icon_x = match alignment {
+                Alignment::Right => right - item.padding - icon.width as i32,
+                Alignment::Left | Alignment::Center => left + item.padding,
+            };
+            self.draw_icon(pixmap, icon, icon_x);
         }
     }
 
@@ -631,16 +607,16 @@ fn next_spacing(
 }
 
 fn next_spacing_for_position(
-    items: &[RenderItem],
+    items: &[PreparedItem],
     position: usize,
     module_spacing: i32,
     item_spacing: i32,
 ) -> i32 {
     items.get(position + 1).map_or(0, |next| {
         next_spacing(
-            items[position].0,
-            next.0,
-            items[position].5,
+            items[position].widget_index,
+            next.widget_index,
+            items[position].content_spacing,
             module_spacing,
             item_spacing,
         )
@@ -769,6 +745,50 @@ mod tests {
                 indicator: None,
             }])
         }
+    }
+
+    struct FixedButtons;
+
+    impl RenderWidget for FixedButtons {
+        fn content(&mut self) -> RenderContent {
+            RenderContent::Buttons(
+                (0..2)
+                    .map(|_| RenderButton {
+                        text: None,
+                        icon: None,
+                        padding: Some(5),
+                        max_width: None,
+                        bold: None,
+                        color: None,
+                        background: None,
+                        indicator: None,
+                    })
+                    .collect(),
+            )
+        }
+
+        fn content_spacing(&self) -> Option<u32> {
+            Some(3)
+        }
+    }
+
+    #[test]
+    fn positions_buttons_in_each_alignment() {
+        let mut renderer = BarRenderer::new(&StyleConfig::default()).unwrap();
+        let mut left: Vec<Box<dyn RenderWidget>> = vec![Box::new(FixedButtons)];
+        let mut center: Vec<Box<dyn RenderWidget>> = vec![Box::new(FixedButtons)];
+        let mut right: Vec<Box<dyn RenderWidget>> = vec![Box::new(FixedButtons)];
+
+        renderer.render(100, 30, None, &mut left, &mut center, &mut right);
+        let hitboxes = &renderer.hitboxes[&None];
+        let bounds: Vec<_> = hitboxes
+            .iter()
+            .map(|hitbox| (hitbox.left, hitbox.right))
+            .collect();
+        assert_eq!(
+            bounds,
+            [(6, 16), (19, 29), (38, 48), (51, 61), (84, 94), (71, 81)]
+        );
     }
 
     #[test]

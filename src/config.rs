@@ -3,6 +3,7 @@ use std::{error::Error, fs, path::PathBuf};
 use serde::Deserialize;
 
 use crate::color::parse_rgba;
+use crate::module::ModuleKind;
 use crate::provider::{cpu, memory, tray};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -263,17 +264,7 @@ impl Config {
             ("right", &mut self.modules.right),
         ] {
             names.retain(|name| {
-                let known = matches!(
-                    name.as_str(),
-                    "clock"
-                        | "battery"
-                        | "memory"
-                        | "cpu"
-                        | "volume"
-                        | "workspace"
-                        | "window"
-                        | "tray"
-                );
+                let known = ModuleKind::parse(name).is_some();
                 if !known {
                     tracing::error!("modules.{group}: unknown module `{name}`; ignoring");
                 }
