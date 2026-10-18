@@ -9,9 +9,7 @@ pub struct CpTime {
 #[cfg(target_os = "freebsd")]
 impl super::CpuProvider for CpTime {
     fn read(&mut self) -> Result<Option<CpuState>, String> {
-        use std::ffi::c_long;
-
-        let ticks: [c_long; 5] = crate::provider::freebsd::sysctl(c"kern.cp_time")?;
+        let ticks = crate::provider::freebsd::sysctl_cpu_ticks(c"kern.cp_time")?;
         let mut current = [0; 5];
         for (value, tick) in current.iter_mut().zip(ticks) {
             *value = u64::try_from(tick)

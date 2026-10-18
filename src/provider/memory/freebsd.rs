@@ -6,12 +6,12 @@ pub struct VmStats;
 #[cfg(target_os = "freebsd")]
 impl super::MemoryProvider for VmStats {
     fn read(&mut self) -> Result<MemoryState, String> {
-        use crate::provider::freebsd::sysctl;
+        use crate::provider::freebsd::sysctl_u32;
 
-        let page_size: u32 = sysctl(c"vm.stats.vm.v_page_size")?;
-        let total_pages: u32 = sysctl(c"vm.stats.vm.v_page_count")?;
-        let free_pages: u32 = sysctl(c"vm.stats.vm.v_free_count")?;
-        let inactive_pages: u32 = sysctl(c"vm.stats.vm.v_inactive_count")?;
+        let page_size = sysctl_u32(c"vm.stats.vm.v_page_size")?;
+        let total_pages = sysctl_u32(c"vm.stats.vm.v_page_count")?;
+        let free_pages = sysctl_u32(c"vm.stats.vm.v_free_count")?;
+        let inactive_pages = sysctl_u32(c"vm.stats.vm.v_inactive_count")?;
         memory_state(page_size, total_pages, free_pages, inactive_pages)
     }
 }

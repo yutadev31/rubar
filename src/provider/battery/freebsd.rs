@@ -6,14 +6,14 @@ pub struct Acpi;
 #[cfg(target_os = "freebsd")]
 impl super::BatteryProvider for Acpi {
     fn read(&mut self) -> Result<BatteryState, String> {
-        use crate::provider::freebsd::sysctl;
+        use crate::provider::freebsd::sysctl_i32;
 
-        let units: i32 = sysctl(c"hw.acpi.battery.units")?;
+        let units = sysctl_i32(c"hw.acpi.battery.units")?;
         if units <= 0 {
             return Err("no ACPI battery found".to_string());
         }
-        let life: i32 = sysctl(c"hw.acpi.battery.life")?;
-        let state: i32 = sysctl(c"hw.acpi.battery.state")?;
+        let life = sysctl_i32(c"hw.acpi.battery.life")?;
+        let state = sysctl_i32(c"hw.acpi.battery.state")?;
         battery_state(life, state)
     }
 }

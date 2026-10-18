@@ -1,5 +1,5 @@
 use std::{
-    ffi::{CStr, c_char, c_int, c_void},
+    ffi::{CStr, c_char, c_int, c_long, c_void},
     io,
     mem::{MaybeUninit, size_of},
     ptr,
@@ -15,7 +15,19 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
-pub(super) fn sysctl<T: Copy>(name: &CStr) -> Result<T, String> {
+pub(super) fn sysctl_i32(name: &CStr) -> Result<i32, String> {
+    read_sysctl(name)
+}
+
+pub(super) fn sysctl_u32(name: &CStr) -> Result<u32, String> {
+    read_sysctl(name)
+}
+
+pub(super) fn sysctl_cpu_ticks(name: &CStr) -> Result<[c_long; 5], String> {
+    read_sysctl(name)
+}
+
+fn read_sysctl<T: Copy>(name: &CStr) -> Result<T, String> {
     let mut value = MaybeUninit::<T>::uninit();
     let mut size = size_of::<T>();
     // SAFETY: `name` is NUL-terminated, `value` has `size` writable bytes,
