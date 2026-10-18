@@ -367,8 +367,29 @@ fn ipc_event_loop(
 }
 
 fn ipc_request(socket: &Path, message_type: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
+    ipc_request_with_timeout(socket, message_type, payload, Duration::from_secs(2))
+}
+
+fn ipc_request_with_timeout(
+    socket: &Path,
+    message_type: u32,
+    payload: &[u8],
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
+    stream.set_read_timeout(Some(timeout)).map_err(|error| {
+        format!(
+            "could not set read timeout for {}: {error}",
+            socket.display()
+        )
+    })?;
+    stream.set_write_timeout(Some(timeout)).map_err(|error| {
+        format!(
+            "could not set write timeout for {}: {error}",
+            socket.display()
+        )
+    })?;
     ipc_write_message(&mut stream, message_type, payload)?;
     ipc_read_message(&mut stream).map(|(_, payload)| payload)
 }
@@ -430,7 +451,24 @@ fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{IpcWorkspace, workspace_snapshot};
+    use super::{IpcWorkspace, ipc_request_with_timeout, workspace_snapshot};
+    use std::{os::unix::net::UnixListener, thread, time::Duration};
+
+    #[test]
+    fn ipc_request_times_out_when_server_does_not_reply() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("i3.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_millis(150));
+        });
+
+        let error = ipc_request_with_timeout(&socket, 1, b"", Duration::from_millis(30))
+            .expect_err("an unresponsive IPC server must not block startup");
+        assert!(error.contains("could not read i3 IPC header"), "{error}");
+        server.join().unwrap();
+    }
 
     #[test]
     fn persistent_workspaces_keep_order_and_focused_output() {
