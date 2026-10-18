@@ -99,7 +99,7 @@ fn connect_by_detection(persistent: &[String]) -> Arc<dyn WmClient> {
     for (name, variable) in [("Sway", "SWAYSOCK"), ("i3", "I3SOCK")] {
         match i3::I3Client::new(name, variable, RECONNECT_INTERVAL, persistent.to_vec()) {
             Ok(provider) => {
-                tracing::debug!(window_manager = name, "connected to window manager");
+                tracing::debug!(window_manager = name, "selected window manager provider");
                 return Arc::new(provider);
             }
             Err(error) => {

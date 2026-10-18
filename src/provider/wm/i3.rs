@@ -71,15 +71,8 @@ impl I3Client {
 
         let state = Arc::new(RwLock::new(None));
         let workspace_names = Arc::new(RwLock::new(HashMap::new()));
-        let title = Arc::new(RwLock::new(read_window_title(&socket)?));
-        tracing::debug!(window_manager = wm_name, socket = %socket.display(), "connecting to window manager");
-        update_ipc_state(
-            wm_name,
-            &socket,
-            &state,
-            &workspace_names,
-            &persistent_workspaces,
-        )?;
+        let title = Arc::new(RwLock::new(None));
+        tracing::debug!(window_manager = wm_name, socket = %socket.display(), "starting window manager IPC worker");
 
         let event_socket = socket.clone();
         let shared_state = Arc::clone(&state);
@@ -305,11 +298,33 @@ fn ipc_event_loop(
     reconnect_interval: Duration,
 ) {
     loop {
-        match UnixStream::connect(&socket) {
+        match subscribe_to_events(&socket) {
             Ok(mut stream) => {
-                if ipc_write_message(&mut stream, 2, br#"["workspace","output","window"]"#).is_ok()
-                    && ipc_read_message(&mut stream).is_ok()
-                {
+                if let Err(error) = update_ipc_state(
+                    wm_name,
+                    &socket,
+                    &state,
+                    &workspace_names,
+                    &persistent_workspaces,
+                ) {
+                    tracing::warn!(
+                        "rubar: could not initialize {wm_name} workspace state: {error}"
+                    );
+                } else {
+                    tracing::debug!(window_manager = wm_name, "window manager IPC ready");
+                    match read_window_title(&socket) {
+                        Ok(value) => match title.write() {
+                            Ok(mut target) => *target = value,
+                            Err(error) => tracing::error!(
+                                "rubar: could not update {wm_name} window title: {error}"
+                            ),
+                        },
+                        Err(error) => {
+                            tracing::warn!(
+                                "rubar: could not read {wm_name} focused window: {error}"
+                            )
+                        }
+                    }
                     loop {
                         match ipc_read_message(&mut stream) {
                             Ok((message_type, _payload)) if message_type & 0x8000_0000 != 0 => {
@@ -360,11 +375,27 @@ fn ipc_event_loop(
                 }
             }
             Err(error) => {
-                tracing::warn!("rubar: could not connect to {wm_name} event socket: {error}")
+                tracing::warn!("rubar: could not subscribe to {wm_name} events: {error}")
             }
         }
         thread::sleep(reconnect_interval);
     }
+}
+
+fn subscribe_to_events(socket: &Path) -> Result<UnixStream, String> {
+    let mut stream = connect_ipc_socket(socket, Duration::from_secs(2))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| format!("could not set {socket:?} read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| format!("could not set {socket:?} write timeout: {error}"))?;
+    ipc_write_message(&mut stream, 2, br#"["workspace","output","window"]"#)?;
+    ipc_read_message(&mut stream)?;
+    stream
+        .set_read_timeout(None)
+        .map_err(|error| format!("could not clear {socket:?} read timeout: {error}"))?;
+    Ok(stream)
 }
 
 fn ipc_request(socket: &Path, message_type: u32, payload: &[u8]) -> Result<Vec<u8>, String> {
@@ -377,15 +408,7 @@ fn ipc_request_with_timeout(
     payload: &[u8],
     timeout: Duration,
 ) -> Result<Vec<u8>, String> {
-    let address = SockAddr::unix(socket)
-        .map_err(|error| format!("invalid i3 IPC socket {}: {error}", socket.display()))?;
-    let connection = Socket::new(Domain::UNIX, Type::STREAM, None)
-        .map_err(|error| format!("could not create i3 IPC socket: {error}"))?;
-    connection
-        .connect_timeout(&address, timeout)
-        .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
-    let descriptor: OwnedFd = connection.into();
-    let mut stream = UnixStream::from(descriptor);
+    let mut stream = connect_ipc_socket(socket, timeout)?;
     stream.set_read_timeout(Some(timeout)).map_err(|error| {
         format!(
             "could not set read timeout for {}: {error}",
@@ -400,6 +423,18 @@ fn ipc_request_with_timeout(
     })?;
     ipc_write_message(&mut stream, message_type, payload)?;
     ipc_read_message(&mut stream).map(|(_, payload)| payload)
+}
+
+fn connect_ipc_socket(socket: &Path, timeout: Duration) -> Result<UnixStream, String> {
+    let address = SockAddr::unix(socket)
+        .map_err(|error| format!("invalid i3 IPC socket {}: {error}", socket.display()))?;
+    let connection = Socket::new(Domain::UNIX, Type::STREAM, None)
+        .map_err(|error| format!("could not create i3 IPC socket: {error}"))?;
+    connection
+        .connect_timeout(&address, timeout)
+        .map_err(|error| format!("could not connect to {}: {error}", socket.display()))?;
+    let descriptor: OwnedFd = connection.into();
+    Ok(UnixStream::from(descriptor))
 }
 
 fn ipc_write_message(
