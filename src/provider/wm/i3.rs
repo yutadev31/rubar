@@ -1,15 +1,19 @@
 use super::{WmClient, Workspace, WorkspaceState};
 use serde::Deserialize;
-use socket2::{Domain, SockAddr, Socket, Type};
+use socket2::{Domain, SockAddr, SockRef, Socket, Type};
 use std::{
     collections::HashMap,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
+    mem::MaybeUninit,
     os::{fd::OwnedFd, unix::net::UnixStream},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
+
+const STATE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const FAILED_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Workspace provider for i3 and Sway, which share the i3 IPC protocol.
 pub(crate) struct I3Client {
@@ -325,15 +329,41 @@ fn ipc_event_loop(
                             )
                         }
                     }
+                    // Reconcile state even if an event is missed or a snapshot fails.
+                    let mut next_refresh = Instant::now() + STATE_REFRESH_INTERVAL;
                     loop {
-                        match ipc_read_message(&mut stream) {
-                            Ok((message_type, _payload)) if message_type & 0x8000_0000 != 0 => {
+                        let now = Instant::now();
+                        if now >= next_refresh {
+                            let interval = refresh_ipc_state(
+                                wm_name,
+                                &socket,
+                                &state,
+                                &workspace_names,
+                                &persistent_workspaces,
+                            );
+                            next_refresh = Instant::now() + interval;
+                            continue;
+                        }
+                        match read_event_until(&mut stream, next_refresh - now) {
+                            Ok(Some((message_type, _payload)))
+                                if message_type & 0x8000_0000 != 0 =>
+                            {
                                 let event_type = message_type & 0x7fff_ffff;
                                 tracing::trace!(
                                     window_manager = wm_name,
                                     event_type,
                                     "received window manager event"
                                 );
+                                if event_type == 0 || event_type == 1 {
+                                    let interval = refresh_ipc_state(
+                                        wm_name,
+                                        &socket,
+                                        &state,
+                                        &workspace_names,
+                                        &persistent_workspaces,
+                                    );
+                                    next_refresh = Instant::now() + interval;
+                                }
                                 if event_type == 3 || event_type == 0 {
                                     match read_window_title(&socket) {
                                         Ok(value) => match title.write() {
@@ -346,21 +376,6 @@ fn ipc_event_loop(
                                             "rubar: could not read {wm_name} focused window: {error}"
                                         ),
                                     }
-                                } else {
-                                    // Workspace and output events refresh the state below.
-                                }
-                                if (event_type == 0 || event_type == 1)
-                                    && let Err(error) = update_ipc_state(
-                                        wm_name,
-                                        &socket,
-                                        &state,
-                                        &workspace_names,
-                                        &persistent_workspaces,
-                                    )
-                                {
-                                    tracing::warn!(
-                                        "rubar: could not refresh {wm_name} workspace state: {error}"
-                                    );
                                 }
                             }
                             Ok(_) => {}
@@ -379,6 +394,46 @@ fn ipc_event_loop(
             }
         }
         thread::sleep(reconnect_interval);
+    }
+}
+
+fn refresh_ipc_state(
+    wm_name: &str,
+    socket: &Path,
+    state: &Arc<RwLock<Option<WorkspaceState>>>,
+    workspace_names: &Arc<RwLock<HashMap<i64, String>>>,
+    persistent_workspaces: &[String],
+) -> Duration {
+    match update_ipc_state(
+        wm_name,
+        socket,
+        state,
+        workspace_names,
+        persistent_workspaces,
+    ) {
+        Ok(()) => STATE_REFRESH_INTERVAL,
+        Err(error) => {
+            tracing::warn!("rubar: could not refresh {wm_name} workspace state: {error}");
+            FAILED_REFRESH_INTERVAL
+        }
+    }
+}
+
+fn read_event_until(
+    stream: &mut UnixStream,
+    timeout: Duration,
+) -> Result<Option<(u32, Vec<u8>)>, String> {
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|error| format!("could not set i3 event read timeout: {error}"))?;
+    // An idle timeout must not consume any part of the next IPC message.
+    match SockRef::from(&*stream).peek(&mut [MaybeUninit::uninit()]) {
+        Ok(0) => Err("i3 event stream closed".to_string()),
+        Ok(_) => ipc_read_message(stream).map(Some),
+        Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+            Ok(None)
+        }
+        Err(error) => Err(format!("could not read i3 event stream: {error}")),
     }
 }
 
@@ -494,11 +549,11 @@ fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{IpcWorkspace, ipc_request_with_timeout, workspace_snapshot};
+    use super::{IpcWorkspace, ipc_request_with_timeout, read_event_until, workspace_snapshot};
     use socket2::{Domain, SockAddr, Socket, Type};
     use std::{
-        io,
-        os::unix::net::UnixListener,
+        io::{self, Write},
+        os::unix::net::{UnixListener, UnixStream},
         thread,
         time::{Duration, Instant},
     };
@@ -549,6 +604,26 @@ mod tests {
             .expect_err("an unresponsive IPC server must not block startup");
         assert!(error.contains("could not read i3 IPC header"), "{error}");
         server.join().unwrap();
+    }
+
+    #[test]
+    fn idle_event_timeout_preserves_the_next_event() {
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        assert!(
+            read_event_until(&mut reader, Duration::from_millis(30))
+                .unwrap()
+                .is_none()
+        );
+
+        writer.write_all(b"i3-ipc").unwrap();
+        writer.write_all(&2_u32.to_le_bytes()).unwrap();
+        writer.write_all(&0x8000_0000_u32.to_le_bytes()).unwrap();
+        writer.write_all(b"{}").unwrap();
+        let (message_type, payload) = read_event_until(&mut reader, Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(message_type, 0x8000_0000);
+        assert_eq!(payload, b"{}");
     }
 
     #[test]
