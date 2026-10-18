@@ -46,4 +46,16 @@ cargo run
 - Prioritize maintainability and runtime performance over ease of implementation.
 - Avoid relying on external command execution whenever possible; when it is necessary, prefer using an external library or IPC instead.
 - If the prompt is ambiguous or lacks necessary information, ask clarifying questions before proceeding.
-- After completing work, output an English commit message following the Conventional Commits specification.
+
+## Git
+
+After completing a task:
+
+1. Run the relevant tests and linters.
+2. Review the diff before committing.
+3. Commit only changes made for the current task.
+4. Use Conventional Commits for commit messages.
+5. Write commit messages in English.
+6. Do not push commits.
+7. Do not amend, rebase, reset, or otherwise rewrite existing commits unless explicitly requested.
+8. Do not include unrelated pre-existing working tree changes in the commit.
