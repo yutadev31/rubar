@@ -7,13 +7,17 @@ use std::{
     mem::MaybeUninit,
     os::{fd::OwnedFd, unix::net::UnixStream},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel},
+    },
     thread,
     time::{Duration, Instant},
 };
 
 const STATE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const FAILED_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const TITLE_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Workspace provider for i3 and Sway, which share the i3 IPC protocol.
 pub(crate) struct I3Client {
@@ -21,7 +25,39 @@ pub(crate) struct I3Client {
     socket: PathBuf,
     state: Arc<RwLock<Option<WorkspaceState>>>,
     workspace_names: Arc<RwLock<HashMap<i64, String>>>,
-    title: Arc<RwLock<Option<String>>>,
+    title: Arc<RwLock<TitleState>>,
+}
+
+#[derive(Default)]
+struct TitleState {
+    value: Option<String>,
+    generation: u64,
+}
+
+struct EventState {
+    workspaces: Arc<RwLock<Option<WorkspaceState>>>,
+    workspace_names: Arc<RwLock<HashMap<i64, String>>>,
+    persistent_workspaces: Vec<String>,
+    title: Arc<RwLock<TitleState>>,
+    title_requests: SyncSender<()>,
+}
+
+#[derive(Deserialize)]
+struct IpcWindowEvent {
+    change: String,
+    container: IpcWindowContainer,
+}
+
+#[derive(Deserialize)]
+struct IpcWindowContainer {
+    name: Option<String>,
+    #[serde(default)]
+    focused: bool,
+}
+
+#[derive(Deserialize)]
+struct IpcWorkspaceEvent {
+    change: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,23 +111,38 @@ impl I3Client {
 
         let state = Arc::new(RwLock::new(None));
         let workspace_names = Arc::new(RwLock::new(HashMap::new()));
-        let title = Arc::new(RwLock::new(None));
+        let title = Arc::new(RwLock::new(TitleState::default()));
         tracing::debug!(window_manager = wm_name, socket = %socket.display(), "starting window manager IPC worker");
 
         let event_socket = socket.clone();
         let shared_state = Arc::clone(&state);
         let shared_names = Arc::clone(&workspace_names);
         let event_persistent_workspaces = persistent_workspaces.clone();
+        let (title_requests, title_events) = sync_channel(1);
+        let title_socket = socket.clone();
+        let shared_title = Arc::clone(&title);
+        thread::spawn(move || {
+            title_loop(
+                wm_name,
+                title_socket,
+                shared_title,
+                title_events,
+                TITLE_RETRY_INTERVAL,
+            )
+        });
         let event_title = Arc::clone(&title);
         let event_wm_name = wm_name;
         thread::spawn(move || {
             ipc_event_loop(
                 event_wm_name,
                 event_socket,
-                shared_state,
-                shared_names,
-                event_persistent_workspaces,
-                event_title,
+                EventState {
+                    workspaces: shared_state,
+                    workspace_names: shared_names,
+                    persistent_workspaces: event_persistent_workspaces,
+                    title: event_title,
+                    title_requests,
+                },
                 reconnect_interval,
             )
         });
@@ -145,7 +196,7 @@ impl WmClient for I3Client {
 
     fn title(&self) -> Option<String> {
         match self.title.read() {
-            Ok(title) => title.clone(),
+            Ok(title) => title.value.clone(),
             Err(error) => {
                 tracing::error!(
                     "rubar: could not read {} window title: {error}",
@@ -295,12 +346,16 @@ fn workspace_snapshot(
 fn ipc_event_loop(
     wm_name: &str,
     socket: PathBuf,
-    state: Arc<RwLock<Option<WorkspaceState>>>,
-    workspace_names: Arc<RwLock<HashMap<i64, String>>>,
-    persistent_workspaces: Vec<String>,
-    title: Arc<RwLock<Option<String>>>,
+    event_state: EventState,
     reconnect_interval: Duration,
 ) {
+    let EventState {
+        workspaces: state,
+        workspace_names,
+        persistent_workspaces,
+        title,
+        title_requests,
+    } = event_state;
     loop {
         match subscribe_to_events(&socket) {
             Ok(mut stream) => {
@@ -316,19 +371,7 @@ fn ipc_event_loop(
                     );
                 } else {
                     tracing::debug!(window_manager = wm_name, "window manager IPC ready");
-                    match read_window_title(&socket) {
-                        Ok(value) => match title.write() {
-                            Ok(mut target) => *target = value,
-                            Err(error) => tracing::error!(
-                                "rubar: could not update {wm_name} window title: {error}"
-                            ),
-                        },
-                        Err(error) => {
-                            tracing::warn!(
-                                "rubar: could not read {wm_name} focused window: {error}"
-                            )
-                        }
-                    }
+                    request_title_update(wm_name, &title, &title_requests);
                     // Reconcile state even if an event is missed or a snapshot fails.
                     let mut next_refresh = Instant::now() + STATE_REFRESH_INTERVAL;
                     loop {
@@ -345,7 +388,7 @@ fn ipc_event_loop(
                             continue;
                         }
                         match read_event_until(&mut stream, next_refresh - now) {
-                            Ok(Some((message_type, _payload)))
+                            Ok(Some((message_type, payload)))
                                 if message_type & 0x8000_0000 != 0 =>
                             {
                                 let event_type = message_type & 0x7fff_ffff;
@@ -364,19 +407,13 @@ fn ipc_event_loop(
                                     );
                                     next_refresh = Instant::now() + interval;
                                 }
-                                if event_type == 3 || event_type == 0 {
-                                    match read_window_title(&socket) {
-                                        Ok(value) => match title.write() {
-                                            Ok(mut target) => *target = value,
-                                            Err(error) => tracing::error!(
-                                                "rubar: could not update {wm_name} window title: {error}"
-                                            ),
-                                        },
-                                        Err(error) => tracing::warn!(
-                                            "rubar: could not read {wm_name} focused window: {error}"
-                                        ),
-                                    }
-                                }
+                                handle_title_event(
+                                    wm_name,
+                                    event_type,
+                                    &payload,
+                                    &title,
+                                    &title_requests,
+                                );
                             }
                             Ok(_) => {}
                             Err(error) => {
@@ -394,6 +431,121 @@ fn ipc_event_loop(
             }
         }
         thread::sleep(reconnect_interval);
+    }
+}
+
+fn handle_title_event(
+    wm_name: &str,
+    event_type: u32,
+    payload: &[u8],
+    title: &RwLock<TitleState>,
+    requests: &SyncSender<()>,
+) {
+    match event_type {
+        0 => match serde_json::from_slice::<IpcWorkspaceEvent>(payload) {
+            Ok(event) if matches!(event.change.as_str(), "focus" | "empty") => {
+                request_title_update(wm_name, title, requests)
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!("rubar: could not parse {wm_name} workspace event: {error}");
+                request_title_update(wm_name, title, requests);
+            }
+        },
+        3 => match serde_json::from_slice::<IpcWindowEvent>(payload) {
+            Ok(event) => match event.change.as_str() {
+                "focus" => set_title_from_event(wm_name, title, event.container.name),
+                "title" if event.container.focused => {
+                    set_title_from_event(wm_name, title, event.container.name)
+                }
+                "close" => request_title_update(wm_name, title, requests),
+                "move" if event.container.focused => request_title_update(wm_name, title, requests),
+                _ => {}
+            },
+            Err(error) => {
+                tracing::warn!("rubar: could not parse {wm_name} window event: {error}");
+                request_title_update(wm_name, title, requests);
+            }
+        },
+        _ => {}
+    }
+}
+
+fn set_title_from_event(wm_name: &str, title: &RwLock<TitleState>, value: Option<String>) {
+    match title.write() {
+        Ok(mut target) => {
+            target.generation = target.generation.wrapping_add(1);
+            target.value = value;
+        }
+        Err(error) => tracing::error!("rubar: could not update {wm_name} window title: {error}"),
+    }
+}
+
+fn request_title_update(wm_name: &str, title: &RwLock<TitleState>, requests: &SyncSender<()>) {
+    match title.write() {
+        Ok(mut target) => target.generation = target.generation.wrapping_add(1),
+        Err(error) => {
+            tracing::error!("rubar: could not mark {wm_name} window title stale: {error}")
+        }
+    }
+    match requests.try_send(()) {
+        Ok(()) | Err(TrySendError::Full(())) => {}
+        Err(TrySendError::Disconnected(())) => {
+            tracing::error!("rubar: {wm_name} window title worker stopped");
+        }
+    }
+}
+
+fn title_loop(
+    wm_name: &str,
+    socket: PathBuf,
+    title: Arc<RwLock<TitleState>>,
+    requests: Receiver<()>,
+    retry_interval: Duration,
+) {
+    let mut failed_generation = None;
+    loop {
+        if let Some(failed) = failed_generation.take() {
+            thread::sleep(retry_interval);
+            match requests.try_recv() {
+                Ok(()) => {}
+                Err(TryRecvError::Empty) => match title.read() {
+                    Ok(current) if current.generation != failed => continue,
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::error!(
+                            "rubar: could not read {wm_name} window title state: {error}"
+                        );
+                        continue;
+                    }
+                },
+                Err(TryRecvError::Disconnected) => break,
+            }
+        } else if requests.recv().is_err() {
+            break;
+        }
+        // One lookup observes the latest title for all pending events.
+        while requests.try_recv().is_ok() {}
+        let generation = match title.read() {
+            Ok(current) => current.generation,
+            Err(error) => {
+                tracing::error!("rubar: could not read {wm_name} window title state: {error}");
+                continue;
+            }
+        };
+        match read_window_title(&socket) {
+            Ok(value) => match title.write() {
+                Ok(mut target) if target.generation == generation => target.value = value,
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::error!("rubar: could not update {wm_name} window title: {error}")
+                }
+            },
+            Err(error) => {
+                tracing::warn!("rubar: could not read {wm_name} focused window: {error}");
+                failed_generation = Some(generation);
+            }
+        }
     }
 }
 
@@ -525,35 +677,45 @@ fn ipc_read_message(stream: &mut UnixStream) -> Result<(u32, Vec<u8>), String> {
 fn read_window_title(socket: &Path) -> Result<Option<String>, String> {
     let tree: serde_json::Value = serde_json::from_slice(&ipc_request(socket, 4, b"")?)
         .map_err(|e| format!("could not parse i3 tree: {e}"))?;
-    fn focused(node: &serde_json::Value) -> Option<String> {
-        if node.get("focused").and_then(serde_json::Value::as_bool) == Some(true) {
-            return node
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-        }
-        node.get("nodes")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .chain(
-                node.get("floating_nodes")
-                    .and_then(serde_json::Value::as_array)
-                    .into_iter()
-                    .flatten(),
-            )
-            .find_map(focused)
+    Ok(focused_window_title(&tree))
+}
+
+fn focused_window_title(node: &serde_json::Value) -> Option<String> {
+    let is_window = node.get("window").is_some_and(serde_json::Value::is_number)
+        || node.get("shell").is_some_and(serde_json::Value::is_string)
+        || node.get("app_id").is_some_and(serde_json::Value::is_string);
+    if is_window && node.get("focused").and_then(serde_json::Value::as_bool) == Some(true) {
+        return node
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
     }
-    Ok(focused(&tree))
+    node.get("nodes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            node.get("floating_nodes")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten(),
+        )
+        .find_map(focused_window_title)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{IpcWorkspace, ipc_request_with_timeout, read_event_until, workspace_snapshot};
+    use super::{
+        IpcWorkspace, STATE_REFRESH_INTERVAL, TitleState, focused_window_title, handle_title_event,
+        ipc_read_message, ipc_request_with_timeout, ipc_write_message, read_event_until,
+        refresh_ipc_state, request_title_update, title_loop, workspace_snapshot,
+    };
     use socket2::{Domain, SockAddr, Socket, Type};
     use std::{
+        collections::HashMap,
         io::{self, Write},
         os::unix::net::{UnixListener, UnixStream},
+        sync::{Arc, RwLock, mpsc::sync_channel},
         thread,
         time::{Duration, Instant},
     };
@@ -624,6 +786,177 @@ mod tests {
             .unwrap();
         assert_eq!(message_type, 0x8000_0000);
         assert_eq!(payload, b"{}");
+    }
+
+    #[test]
+    fn slow_title_reply_does_not_delay_workspace_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("i3.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let title = Arc::new(RwLock::new(TitleState::default()));
+        let (requests, events) = sync_channel(1);
+        let title_socket = socket.clone();
+        let worker_title = Arc::clone(&title);
+        let worker = thread::spawn(move || {
+            title_loop(
+                "i3",
+                title_socket,
+                worker_title,
+                events,
+                Duration::from_millis(30),
+            )
+        });
+        request_title_update("i3", &title, &requests);
+
+        let (mut stalled_title_reply, _) = listener.accept().unwrap();
+        assert_eq!(ipc_read_message(&mut stalled_title_reply).unwrap().0, 4);
+        let responder = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(ipc_read_message(&mut stream).unwrap().0, 1);
+            ipc_write_message(
+                &mut stream,
+                1,
+                br#"[{"name":"1","output":"HDMI-1","focused":true,"visible":true}]"#,
+            )
+            .unwrap();
+        });
+
+        let state = Arc::new(RwLock::new(None));
+        let names = Arc::new(RwLock::new(HashMap::new()));
+        let start = Instant::now();
+        let interval = refresh_ipc_state("i3", &socket, &state, &names, &[]);
+        assert_eq!(interval, STATE_REFRESH_INTERVAL);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert_eq!(state.read().unwrap().as_ref().unwrap().active_id, 1);
+
+        handle_title_event(
+            "i3",
+            3,
+            br#"{"change":"focus","container":{"name":"New","focused":true}}"#,
+            &title,
+            &requests,
+        );
+        ipc_write_message(
+            &mut stalled_title_reply,
+            4,
+            br#"{"nodes":[{"window":42,"focused":true,"name":"Old"}]}"#,
+        )
+        .unwrap();
+        drop(stalled_title_reply);
+        drop(requests);
+        responder.join().unwrap();
+        worker.join().unwrap();
+        assert_eq!(title.read().unwrap().value.as_deref(), Some("New"));
+    }
+
+    #[test]
+    fn title_events_skip_unrelated_tree_requests() {
+        let title = RwLock::new(TitleState::default());
+        let (requests, pending) = sync_channel(1);
+        handle_title_event(
+            "i3",
+            3,
+            br#"{"change":"focus","container":{"name":"Terminal","focused":true}}"#,
+            &title,
+            &requests,
+        );
+        handle_title_event(
+            "i3",
+            3,
+            br#"{"change":"title","container":{"name":"Other","focused":false}}"#,
+            &title,
+            &requests,
+        );
+        handle_title_event("i3", 0, br#"{"change":"rename"}"#, &title, &requests);
+        assert_eq!(title.read().unwrap().value.as_deref(), Some("Terminal"));
+        assert!(pending.try_recv().is_err());
+
+        handle_title_event(
+            "i3",
+            3,
+            br#"{"change":"title","container":{"name":"Shell","focused":true}}"#,
+            &title,
+            &requests,
+        );
+        assert_eq!(title.read().unwrap().value.as_deref(), Some("Shell"));
+        assert!(pending.try_recv().is_err());
+
+        handle_title_event("i3", 0, br#"{"change":"focus"}"#, &title, &requests);
+        assert!(pending.try_recv().is_ok());
+    }
+
+    #[test]
+    fn focused_window_title_ignores_empty_workspace_and_supports_sway() {
+        let empty = serde_json::json!({
+            "type": "workspace", "name": "1", "focused": true, "window": null,
+            "nodes": [], "floating_nodes": []
+        });
+        assert_eq!(focused_window_title(&empty), None);
+
+        let i3 = serde_json::json!({
+            "type": "workspace", "focused": false,
+            "nodes": [{"type": "con", "name": "Terminal", "focused": true, "window": 42}]
+        });
+        assert_eq!(focused_window_title(&i3).as_deref(), Some("Terminal"));
+
+        let sway = serde_json::json!({
+            "type": "workspace", "focused": false,
+            "nodes": [{"type": "con", "name": "Editor", "focused": true,
+                "window": null, "shell": "xdg_shell"}]
+        });
+        assert_eq!(focused_window_title(&sway).as_deref(), Some("Editor"));
+    }
+
+    #[test]
+    fn title_lookup_retries_after_an_ipc_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("i3.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            assert_eq!(ipc_read_message(&mut first).unwrap().0, 4);
+            drop(first);
+
+            listener.set_nonblocking(true).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            let mut second = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("title lookup was not retried: {error}"),
+                }
+            };
+            assert_eq!(ipc_read_message(&mut second).unwrap().0, 4);
+            ipc_write_message(
+                &mut second,
+                4,
+                br#"{"nodes":[{"window":42,"focused":true,"name":"Recovered"}]}"#,
+            )
+            .unwrap();
+        });
+
+        let title = Arc::new(RwLock::new(TitleState::default()));
+        let (requests, events) = sync_channel(1);
+        let worker_title = Arc::clone(&title);
+        let worker = thread::spawn(move || {
+            title_loop(
+                "i3",
+                socket,
+                worker_title,
+                events,
+                Duration::from_millis(30),
+            )
+        });
+        request_title_update("i3", &title, &requests);
+        server.join().unwrap();
+        drop(requests);
+        worker.join().unwrap();
+        assert_eq!(title.read().unwrap().value.as_deref(), Some("Recovered"));
     }
 
     #[test]
