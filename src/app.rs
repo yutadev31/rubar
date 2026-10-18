@@ -155,47 +155,70 @@ impl App {
         } else {
             wm::connect(&config.workspace.persistent_workspaces)
         };
+        let available_names: Vec<String> = self
+            .active_config
+            .modules
+            .left
+            .iter()
+            .chain(&self.active_config.modules.center)
+            .chain(&self.active_config.modules.right)
+            .cloned()
+            .chain(self.dormant_trays.iter().map(|(name, _)| name.clone()))
+            .collect();
+        let mut reserved = vec![false; available_names.len()];
+        let left = plan_widgets(
+            &config.modules.left,
+            config,
+            &self.active_config,
+            &ipc_client,
+            &available_names,
+            &mut reserved,
+        )?;
+        let center = plan_widgets(
+            &config.modules.center,
+            config,
+            &self.active_config,
+            &ipc_client,
+            &available_names,
+            &mut reserved,
+        )?;
+        let right = plan_widgets(
+            &config.modules.right,
+            config,
+            &self.active_config,
+            &ipc_client,
+            &available_names,
+            &mut reserved,
+        )?;
+
         let old_widgets = std::mem::take(&mut self.widgets);
-        let mut available = Vec::new();
-        for (names, widgets) in [
-            (&self.active_config.modules.left, old_widgets.left),
-            (&self.active_config.modules.center, old_widgets.center),
-            (&self.active_config.modules.right, old_widgets.right),
-        ] {
-            available.extend(names.iter().cloned().zip(widgets));
-        }
-        available.append(&mut self.dormant_trays);
+        let mut available: Vec<_> = old_widgets
+            .left
+            .into_iter()
+            .chain(old_widgets.center)
+            .chain(old_widgets.right)
+            .chain(self.dormant_trays.drain(..).map(|(_, widget)| widget))
+            .map(Some)
+            .collect();
         let widgets = WidgetGroups {
-            left: create_widgets_reusing(
-                &config.modules.left,
-                config,
-                &self.active_config,
-                &ipc_client,
-                &mut available,
-            )?,
-            center: create_widgets_reusing(
-                &config.modules.center,
-                config,
-                &self.active_config,
-                &ipc_client,
-                &mut available,
-            )?,
-            right: create_widgets_reusing(
-                &config.modules.right,
-                config,
-                &self.active_config,
-                &ipc_client,
-                &mut available,
-            )?,
+            left: materialize_widgets(left, &mut available, config),
+            center: materialize_widgets(center, &mut available, config),
+            right: materialize_widgets(right, &mut available, config),
         };
         let surfaces = vec![panel_surface_config(&config.style, self.x11_width)];
         self.restart_backend = self.surfaces[0].size.height != surfaces[0].size.height;
         self.renderer = renderer;
         self._ipc_client = ipc_client;
         self.widgets = widgets;
-        self.dormant_trays = available
+        self.dormant_trays = available_names
             .into_iter()
-            .filter(|(name, _)| name == "tray")
+            .zip(available)
+            .filter_map(|(name, widget)| {
+                (name == "tray")
+                    .then_some(widget)
+                    .flatten()
+                    .map(|widget| (name, widget))
+            })
             .collect();
         self.surfaces = surfaces;
         self.active_config = config.clone();
@@ -336,24 +359,50 @@ fn create_widgets(
         .collect()
 }
 
-fn create_widgets_reusing(
+enum WidgetPlan {
+    Reuse(usize),
+    New(Box<dyn crate::widget::Widget>),
+}
+
+fn plan_widgets(
     names: &[String],
     config: &Config,
     previous: &Config,
     ipc_client: &Arc<dyn WmClient>,
-    available: &mut Vec<(String, Box<dyn crate::widget::Widget>)>,
-) -> Result<Vec<Box<dyn crate::widget::Widget>>, Box<dyn Error>> {
+    available_names: &[String],
+    reserved: &mut [bool],
+) -> Result<Vec<WidgetPlan>, Box<dyn Error>> {
     names
         .iter()
         .map(|name| {
             if reusable(name, previous, config)
-                && let Some(index) = available.iter().position(|(old_name, _)| old_name == name)
+                && let Some(index) = available_names
+                    .iter()
+                    .enumerate()
+                    .position(|(index, old_name)| !reserved[index] && old_name == name)
             {
-                let (_, mut widget) = available.remove(index);
-                widget.reload_config(config);
-                return Ok(widget);
+                reserved[index] = true;
+                return Ok(WidgetPlan::Reuse(index));
             }
-            create_widget(name, config, ipc_client)
+            create_widget(name, config, ipc_client).map(WidgetPlan::New)
+        })
+        .collect()
+}
+
+fn materialize_widgets(
+    plans: Vec<WidgetPlan>,
+    available: &mut [Option<Box<dyn crate::widget::Widget>>],
+    config: &Config,
+) -> Vec<Box<dyn crate::widget::Widget>> {
+    plans
+        .into_iter()
+        .map(|plan| match plan {
+            WidgetPlan::Reuse(index) => {
+                let mut widget = available[index].take().expect("reserved widget exists");
+                widget.reload_config(config);
+                widget
+            }
+            WidgetPlan::New(widget) => widget,
         })
         .collect()
 }
@@ -397,5 +446,25 @@ fn create_widget(
         "tray" => Ok(Box::new(Tray::new(&config.tray, config.style.clone())?)
             as Box<dyn crate::widget::Widget>),
         _ => Err(format!("unknown module `{name}`").into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_reload_preserves_existing_widgets() {
+        let mut config = Config::default();
+        config.modules.left.push("clock".to_string());
+        let mut app = App::new(&config).unwrap();
+
+        let mut invalid = config.clone();
+        invalid.modules.left = vec!["tray".to_string()];
+        invalid.tray.provider = "missing".to_string();
+
+        assert!(app.apply_config(&invalid).is_err());
+        assert_eq!(app.widgets.left.len(), 1);
+        assert_eq!(app.active_config, config);
     }
 }
