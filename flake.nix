@@ -47,7 +47,7 @@
 
         rubar = pkgs.rustPlatform.buildRustPackage {
           pname = "rubar";
-          version = "0.3.4";
+          version = "0.3.5";
           src = ./.;
 
           cargoLock = {
