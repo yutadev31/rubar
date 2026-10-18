@@ -3,7 +3,7 @@ use std::{error::Error, fs, path::PathBuf};
 use serde::Deserialize;
 
 use crate::color::parse_rgba;
-use crate::provider::{memory, tray};
+use crate::provider::{cpu, memory, tray};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -11,6 +11,7 @@ pub struct Config {
     pub clock: ClockConfig,
     pub battery: BatteryConfig,
     pub memory: MemoryConfig,
+    pub cpu: CpuConfig,
     pub modules: ModulesConfig,
     pub volume: VolumeConfig,
     pub workspace: WorkspaceConfig,
@@ -72,6 +73,14 @@ pub struct BatteryConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct MemoryConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CpuConfig {
     pub provider: String,
     pub format: String,
     pub refresh_seconds: u64,
@@ -180,6 +189,16 @@ impl Default for MemoryConfig {
     }
 }
 
+impl Default for CpuConfig {
+    fn default() -> Self {
+        Self {
+            provider: "auto".to_string(),
+            format: "{percent}% 󰻠".to_string(),
+            refresh_seconds: 2,
+        }
+    }
+}
+
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
@@ -246,7 +265,14 @@ impl Config {
             names.retain(|name| {
                 let known = matches!(
                     name.as_str(),
-                    "clock" | "battery" | "memory" | "volume" | "workspace" | "window" | "tray"
+                    "clock"
+                        | "battery"
+                        | "memory"
+                        | "cpu"
+                        | "volume"
+                        | "workspace"
+                        | "window"
+                        | "tray"
                 );
                 if !known {
                     tracing::error!("modules.{group}: unknown module `{name}`; ignoring");
@@ -284,6 +310,10 @@ impl Config {
         }
         memory::validate_name(&self.memory.provider)
             .map_err(|error| format!("memory.provider: {error}"))?;
+        if self.cpu.refresh_seconds == 0 {
+            return Err("cpu.refresh_seconds must be greater than zero".to_string());
+        }
+        cpu::validate_name(&self.cpu.provider).map_err(|error| format!("cpu.provider: {error}"))?;
         if self.volume.scroll_step == 0 || self.volume.scroll_step > 100 {
             return Err("volume.scroll_step must be between 1 and 100".to_string());
         }
@@ -410,6 +440,34 @@ mod tests {
             .to_string();
         assert!(error.contains("memory.provider"));
         assert!(error.contains("unknown"));
+    }
+
+    #[test]
+    fn accepts_cpu_module_and_validates_configuration() {
+        let config = Config::parse(
+            "[modules]\nright = ['cpu']\n[cpu]\nformat = '{percent}%'\nrefresh_seconds = 3\n",
+        )
+        .unwrap();
+        assert_eq!(config.modules.right, ["cpu"]);
+        assert_eq!(config.cpu.format, "{percent}%");
+        assert_eq!(config.cpu.provider, "auto");
+
+        let mut config = config;
+        config.cpu.refresh_seconds = 0;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("cpu.refresh_seconds")
+        );
+        assert!(
+            Config::parse("[cpu]\nprovider = 'unknown'\n")
+                .unwrap_err()
+                .to_string()
+                .contains("cpu.provider")
+        );
+        #[cfg(target_os = "linux")]
+        assert!(Config::parse("[cpu]\nprovider = 'linux'\n").is_ok());
     }
 
     #[test]
