@@ -211,11 +211,12 @@ impl App {
         self.renderer = renderer;
         self._ipc_client = ipc_client;
         self.widgets = widgets;
+        let same_tray_provider = self.active_config.tray.provider == config.tray.provider;
         self.dormant_trays = available_names
             .into_iter()
             .zip(available)
             .filter_map(|(name, widget)| {
-                (ModuleKind::parse(&name) == Some(ModuleKind::Tray))
+                (same_tray_provider && ModuleKind::parse(&name) == Some(ModuleKind::Tray))
                     .then_some(widget)
                     .flatten()
                     .map(|widget| (name, widget))
@@ -475,5 +476,22 @@ mod tests {
         assert!(app.apply_config(&invalid).is_err());
         assert_eq!(app.widgets.left.len(), 1);
         assert_eq!(app.active_config, config);
+    }
+
+    #[test]
+    fn dormant_trays_are_discarded_when_provider_changes() {
+        let config = Config::default();
+        let mut app = App::new(&config).unwrap();
+        app.dormant_trays
+            .push(("tray".to_string(), Box::new(Clock::new(&config.clock))));
+
+        let mut updated = config.clone();
+        updated.style.font_size += 1.0;
+        app.apply_config(&updated).unwrap();
+        assert_eq!(app.dormant_trays.len(), 1);
+
+        updated.tray.provider = "sni".to_string();
+        app.apply_config(&updated).unwrap();
+        assert!(app.dormant_trays.is_empty());
     }
 }
