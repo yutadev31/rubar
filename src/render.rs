@@ -159,12 +159,11 @@ impl BarRenderer {
             std::mem::take(&mut self.current_hitboxes),
         );
 
-        // tiny-skia stores RGBA pixels. On little-endian machines Wayland's
-        // ARGB8888 shm format is laid out as B,G,R,A, so convert explicitly.
+        // tiny-skia stores RGBA pixels; shell-surface expects native ARGB8888.
         let (pixels, _) = pixmap.data().as_chunks::<4>();
         pixels
             .iter()
-            .flat_map(|rgba| [rgba[2], rgba[1], rgba[0], rgba[3]])
+            .flat_map(|rgba| native_argb8888(*rgba))
             .collect()
     }
 
@@ -590,6 +589,10 @@ impl BarRenderer {
             }
         }
     }
+}
+
+fn native_argb8888([red, green, blue, alpha]: [u8; 4]) -> [u8; 4] {
+    u32::from_be_bytes([alpha, red, green, blue]).to_ne_bytes()
 }
 
 fn next_spacing(
