@@ -3,7 +3,7 @@ use std::{error::Error, fs, path::PathBuf};
 use serde::Deserialize;
 
 use crate::color::parse_rgba;
-use crate::provider::memory;
+use crate::provider::{memory, tray};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -22,12 +22,16 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TrayConfig {
+    pub provider: String,
     pub icon_size: u32,
 }
 
 impl Default for TrayConfig {
     fn default() -> Self {
-        Self { icon_size: 16 }
+        Self {
+            provider: "auto".to_string(),
+            icon_size: 16,
+        }
     }
 }
 
@@ -269,6 +273,8 @@ impl Config {
         if self.tray.icon_size == 0 {
             return Err("tray.icon_size must be greater than zero".to_string());
         }
+        tray::validate_name(&self.tray.provider)
+            .map_err(|error| format!("tray.provider: {error}"))?;
         if self.battery.refresh_seconds == 0 {
             return Err("battery.refresh_seconds must be greater than zero".to_string());
         }
@@ -390,6 +396,18 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("memory.provider"));
+        assert!(error.contains("unknown"));
+    }
+
+    #[test]
+    fn validates_tray_provider_name() {
+        assert_eq!(Config::default().tray.provider, "auto");
+        assert!(Config::parse("[tray]\nprovider = 'sni'\n").is_ok());
+
+        let error = Config::parse("[tray]\nprovider = 'unknown'\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("tray.provider"));
         assert!(error.contains("unknown"));
     }
 
