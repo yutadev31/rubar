@@ -227,8 +227,9 @@ fn render_workspaces(
                 monitor: workspace.monitor.clone(),
                 local_index,
                 text,
-                active: workspace.id == active_id,
-                active_on_monitor: workspace.id == globally_active_id,
+                active: workspace.active || workspace.id == active_id,
+                active_on_monitor: workspace.id == globally_active_id
+                    || (workspace.active && workspace.monitor_id == state.active_monitor_id),
                 urgent: workspace.urgent,
             }
         })
@@ -252,6 +253,7 @@ mod tests {
                     monitor_id: 0,
                     monitor: "DP-1".to_string(),
                     urgent: false,
+                    active: false,
                 },
                 Workspace {
                     id: 2,
@@ -259,6 +261,7 @@ mod tests {
                     monitor_id: 0,
                     monitor: "DP-1".to_string(),
                     urgent: false,
+                    active: false,
                 },
                 Workspace {
                     id: 11,
@@ -266,6 +269,7 @@ mod tests {
                     monitor_id: 1,
                     monitor: "HDMI-A-1".to_string(),
                     urgent: false,
+                    active: false,
                 },
             ],
             active_id: 2,
@@ -339,5 +343,27 @@ mod tests {
                 urgent: false
             }]
         );
+    }
+
+    #[test]
+    fn multiple_active_tags_are_marked_on_the_focused_monitor() {
+        let state = WorkspaceState {
+            workspaces: (1..=2)
+                .map(|id| Workspace {
+                    id,
+                    name: id.to_string(),
+                    monitor_id: 1,
+                    monitor: "DP-1".to_string(),
+                    urgent: false,
+                    active: true,
+                })
+                .collect(),
+            active_id: 1,
+            active_monitor_id: 1,
+            active_ids: HashMap::from([("DP-1".to_string(), 1)]),
+        };
+        let rendered = render_workspaces(&state, Some("DP-1"), false);
+        assert!(rendered.iter().all(|workspace| workspace.active));
+        assert!(rendered.iter().all(|workspace| workspace.active_on_monitor));
     }
 }

@@ -2,7 +2,9 @@
 
 `rubar` is a configurable status bar for Wayland and X11, written in Rust. It creates a bar at the top of each output and supports workspaces, the focused window, a clock, battery, CPU and memory usage, audio volume, and a system tray.
 
-Workspace and window information is available through Hyprland, Sway, i3, or niri IPC. System metrics use native Linux or FreeBSD interfaces, audio uses PulseAudio, and tray icons use the StatusNotifierItem protocol.
+Workspace and window information is available through Hyprland, Sway, i3, niri, or MangoWM IPC. System metrics use native Linux or FreeBSD interfaces, audio uses PulseAudio, and tray icons use the StatusNotifierItem protocol.
+
+On MangoWM, the `workspace` widget shows tags on each monitor and supports clicking a tag to view it. The `window` widget shows the focused client title. Run `rubar` within the MangoWM session so it inherits `MANGO_INSTANCE_SIGNATURE`.
 
 ## Build and run
 
