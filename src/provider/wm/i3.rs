@@ -314,6 +314,7 @@ fn workspace_snapshot(
                 monitor_id: *output_ids.get(&spec.output).unwrap_or(&0),
                 monitor: spec.output.clone(),
                 urgent: spec.urgent,
+                active: false,
             }
         })
         .collect::<Vec<_>>();

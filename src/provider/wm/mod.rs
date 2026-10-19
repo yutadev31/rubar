@@ -1,5 +1,6 @@
 pub(crate) mod hyprland;
 pub(crate) mod i3;
+pub(crate) mod mango;
 pub(crate) mod niri;
 
 use serde::Deserialize;
@@ -23,6 +24,8 @@ pub(crate) struct Workspace {
     pub(crate) monitor: String,
     #[serde(default)]
     pub(crate) urgent: bool,
+    #[serde(default)]
+    pub(crate) active: bool,
 }
 
 pub(crate) trait WmClient: Send + Sync {
@@ -64,6 +67,10 @@ pub(crate) fn connect(persistent_workspaces: &[i64]) -> Arc<dyn WmClient> {
             ),
             "niri" => Some(
                 niri::NiriClient::new(RECONNECT_INTERVAL)
+                    .map(|provider| Arc::new(provider) as Arc<dyn WmClient>),
+            ),
+            "mango" | "Mango" | "mangowm" => Some(
+                mango::MangoClient::new(RECONNECT_INTERVAL)
                     .map(|provider| Arc::new(provider) as Arc<dyn WmClient>),
             ),
             "hyprland" | "Hyprland" => Some(
@@ -110,6 +117,11 @@ fn connect_by_detection(persistent: &[String]) -> Arc<dyn WmClient> {
 
     if let Ok(provider) = niri::NiriClient::new(RECONNECT_INTERVAL) {
         tracing::debug!(window_manager = "niri", "connected to window manager");
+        return Arc::new(provider);
+    }
+
+    if let Ok(provider) = mango::MangoClient::new(RECONNECT_INTERVAL) {
+        tracing::debug!(window_manager = "MangoWM", "connected to window manager");
         return Arc::new(provider);
     }
 

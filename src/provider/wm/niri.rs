@@ -199,6 +199,7 @@ fn parse_workspaces(event: &Value) -> Result<WorkspaceState, String> {
             monitor_id,
             monitor,
             urgent: workspace.is_urgent,
+            active: false,
         });
     }
     workspaces.sort_by(|a, b| {
