@@ -425,6 +425,8 @@ mod tests {
         assert!(Config::parse("[memory]\nprovider = 'auto'\n").is_ok());
         #[cfg(target_os = "linux")]
         assert!(Config::parse("[memory]\nprovider = 'linux'\n").is_ok());
+        #[cfg(target_os = "freebsd")]
+        assert!(Config::parse("[memory]\nprovider = 'freebsd'\n").is_ok());
 
         let error = Config::parse("[memory]\nprovider = 'unknown'\n")
             .unwrap_err()
@@ -459,6 +461,8 @@ mod tests {
         );
         #[cfg(target_os = "linux")]
         assert!(Config::parse("[cpu]\nprovider = 'linux'\n").is_ok());
+        #[cfg(target_os = "freebsd")]
+        assert!(Config::parse("[cpu]\nprovider = 'freebsd'\n").is_ok());
     }
 
     #[test]

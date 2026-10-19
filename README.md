@@ -1,8 +1,8 @@
 # rubar
 
-`rubar` is a configurable status bar for Wayland, written in Rust. It creates a bar at the top of each output and supports workspaces, the focused window, a clock, battery, CPU and memory usage, audio volume, and a system tray.
+`rubar` is a configurable status bar for Wayland and X11, written in Rust. It creates a bar at the top of each output and supports workspaces, the focused window, a clock, battery, CPU and memory usage, audio volume, and a system tray.
 
-Workspace and window information is available through Hyprland, Sway, i3, or niri IPC. System metrics use Linux interfaces, audio uses PulseAudio, and tray icons use the StatusNotifierItem protocol.
+Workspace and window information is available through Hyprland, Sway, i3, or niri IPC. System metrics use native Linux or FreeBSD interfaces, audio uses PulseAudio, and tray icons use the StatusNotifierItem protocol.
 
 ## Build and run
 
@@ -22,7 +22,17 @@ cargo build --release
 
 The Nix flake also exposes a `rubar` package, which you can run with `nix run .`.
 
-When building outside Nix, install a recent Rust toolchain, `pkg-config`, and development libraries for PulseAudio, XCB, and Wayland. Run `rubar` inside a Wayland session.
+When building outside Nix, install a recent Rust toolchain, `pkg-config`, and development libraries for PulseAudio, XCB, and Wayland. Run `rubar` inside a Wayland or X11 session.
+
+### FreeBSD
+
+Build with Cargo after installing the Rust toolchain, `pkgconf`, and the PulseAudio, XCB, and Wayland libraries:
+
+```sh
+cargo build --release
+```
+
+The `cpu`, `memory`, and `battery` widgets select FreeBSD providers automatically. The battery provider reads the aggregate ACPI battery state; on systems without an ACPI battery, it reports the missing battery and leaves the widget empty. FreeBSD memory availability includes free and inactive pages. The volume widget requires a PulseAudio-compatible server, and the tray requires a D-Bus session. Workspace and window widgets require one of the supported window managers or compositors listed above.
 
 ## Configuration
 
