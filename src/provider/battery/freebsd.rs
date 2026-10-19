@@ -19,14 +19,14 @@ impl super::BatteryProvider for Acpi {
 }
 
 fn battery_state(life: i32, state: i32) -> Result<BatteryState, String> {
-    let percent = u8::try_from(life)
-        .ok()
-        .filter(|percent| *percent <= 100)
-        .ok_or_else(|| format!("invalid ACPI battery capacity: {life}"))?;
     // acpiio.h: DISCHARG=0x01, CHARGING=0x02, NOT_PRESENT=0x07.
     if state == 0x07 {
         return Err("ACPI battery is not present".to_string());
     }
+    let percent = u8::try_from(life)
+        .ok()
+        .filter(|percent| *percent <= 100)
+        .ok_or_else(|| format!("invalid ACPI battery capacity: {life}"))?;
     let status = if state & 0x02 != 0 {
         BatteryStatus::Charging
     } else if state & 0x01 != 0 {
@@ -53,9 +53,16 @@ mod tests {
             battery_state(42, 0x02).unwrap().status,
             BatteryStatus::Charging
         );
+        assert_eq!(
+            battery_state(42, 0x03).unwrap().status,
+            BatteryStatus::Charging
+        );
         assert_eq!(battery_state(100, 0).unwrap().status, BatteryStatus::Full);
         assert_eq!(battery_state(42, 0).unwrap().status, BatteryStatus::Unknown);
         assert!(battery_state(101, 0).is_err());
-        assert!(battery_state(42, 0x07).is_err());
+        assert_eq!(
+            battery_state(-1, 0x07).unwrap_err(),
+            "ACPI battery is not present"
+        );
     }
 }
