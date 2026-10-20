@@ -205,7 +205,6 @@ pub struct WorkspaceConfig {
     pub urgent_color: String,
     pub active_indicator_height: u32,
     pub active_indicator_position: String,
-    pub all_monitors: bool,
     /// Numeric workspaces that should always be shown by i3/Sway.
     pub persistent_workspaces: Vec<i64>,
 }
@@ -220,10 +219,6 @@ impl Default for WorkspaceConfig {
             urgent_color: "#f7768e".to_string(),
             active_indicator_height: 2,
             active_indicator_position: "bottom".to_string(),
-            // A bar now exists on every output, so the workspace module should
-            // expose the complete Hyprland workspace state by default. Users
-            // who prefer the focused monitor only can still set this to false.
-            all_monitors: true,
             persistent_workspaces: Vec::new(),
         }
     }
