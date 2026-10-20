@@ -113,7 +113,9 @@ impl PreparedItem {
             .icon
             .as_ref()
             .map_or(0, |icon| icon.width as i32);
-        self.text_width.max(icon_width) + self.padding * 2
+        self.text_width
+            .max(icon_width)
+            .saturating_add(self.padding.saturating_mul(2))
     }
 }
 
@@ -216,19 +218,19 @@ impl BarRenderer {
         let mut items = self.prepare_items(widgets, metrics);
         let module_spacing = self.config.module_spacing as i32;
         let item_spacing = self.config.item_spacing as i32;
-        let total_width = items.iter().map(PreparedItem::width).sum::<i32>()
-            + items
-                .windows(2)
-                .map(|pair| {
-                    next_spacing(
-                        pair[0].widget_index,
-                        pair[1].widget_index,
-                        pair[0].content_spacing,
-                        module_spacing,
-                        item_spacing,
-                    )
-                })
-                .sum::<i32>();
+        let total_width = items
+            .iter()
+            .map(PreparedItem::width)
+            .chain(items.windows(2).map(|pair| {
+                next_spacing(
+                    pair[0].widget_index,
+                    pair[1].widget_index,
+                    pair[0].content_spacing,
+                    module_spacing,
+                    item_spacing,
+                )
+            }))
+            .fold(0_i32, i32::saturating_add);
         let mut cursor = match alignment {
             Alignment::Left => self.config.bar_padding as i32,
             Alignment::Center => (metrics.width as i32 - total_width) / 2,
@@ -241,14 +243,14 @@ impl BarRenderer {
         for (position, item) in items.iter().enumerate() {
             let width = item.width();
             let (left, right) = match alignment {
-                Alignment::Right => (cursor - width, cursor),
-                Alignment::Left | Alignment::Center => (cursor, cursor + width),
+                Alignment::Right => (cursor.saturating_sub(width), cursor),
+                Alignment::Left | Alignment::Center => (cursor, cursor.saturating_add(width)),
             };
             self.draw_prepared_item(pixmap, item, metrics, alignment, left, right);
             let spacing = next_spacing_for_position(&items, position, module_spacing, item_spacing);
             cursor = match alignment {
-                Alignment::Right => left - spacing,
-                Alignment::Left | Alignment::Center => right + spacing,
+                Alignment::Right => left.saturating_sub(spacing),
+                Alignment::Left | Alignment::Center => right.saturating_add(spacing),
             };
         }
     }
@@ -342,15 +344,19 @@ impl BarRenderer {
         ));
         if let Some(text) = button.text.as_deref() {
             let text_right = match alignment {
-                Alignment::Right => right - item.padding,
-                Alignment::Left | Alignment::Center => left + item.padding + item.text_width,
+                Alignment::Right => right.saturating_sub(item.padding),
+                Alignment::Left | Alignment::Center => left
+                    .saturating_add(item.padding)
+                    .saturating_add(item.text_width),
             };
             self.draw_text(pixmap, text, text_right, metrics, button_color, bold);
         }
         if let Some(icon) = button.icon.as_ref() {
             let icon_x = match alignment {
-                Alignment::Right => right - item.padding - icon.width as i32,
-                Alignment::Left | Alignment::Center => left + item.padding,
+                Alignment::Right => right
+                    .saturating_sub(item.padding)
+                    .saturating_sub(icon.width as i32),
+                Alignment::Left | Alignment::Center => left.saturating_add(item.padding),
             };
             self.draw_icon(pixmap, icon, icon_x);
         }
@@ -512,7 +518,7 @@ impl BarRenderer {
             .map(|run| run.line_w)
             .fold(0.0_f32, f32::max)
             .ceil() as i32;
-        let x = right - text_width;
+        let x = right.saturating_sub(text_width);
 
         let text_y = ((metrics.height as f32 - line_height) / 2.0).max(0.0) as i32;
         buffer.draw(
@@ -520,8 +526,8 @@ impl BarRenderer {
             &mut self.swash_cache,
             text_color,
             |glyph_x, glyph_y, _w, _h, color| {
-                let px = x + glyph_x;
-                let py = text_y + glyph_y;
+                let px = x.saturating_add(glyph_x);
+                let py = text_y.saturating_add(glyph_y);
                 if px < 0 || py < 0 || px >= pixmap.width() as i32 || py >= pixmap.height() as i32 {
                     return;
                 }
@@ -557,8 +563,8 @@ impl BarRenderer {
         let y = ((pixmap.height() as i32 - icon.height as i32) / 2).max(0);
         for iy in 0..icon.height {
             for ix in 0..icon.width {
-                let px = x + ix as i32;
-                let py = y + iy as i32;
+                let px = x.saturating_add(ix as i32);
+                let py = y.saturating_add(iy as i32);
                 if px < 0 || py < 0 || px >= pixmap.width() as i32 || py >= pixmap.height() as i32 {
                     continue;
                 }
@@ -792,6 +798,27 @@ mod tests {
             bounds,
             [(6, 16), (19, 29), (38, 48), (51, 61), (84, 94), (71, 81)]
         );
+    }
+
+    #[test]
+    fn large_item_padding_does_not_overflow_layout() {
+        let config = StyleConfig {
+            item_padding: i32::MAX as u32,
+            ..StyleConfig::default()
+        };
+        let mut renderer = BarRenderer::new(&config).unwrap();
+        let widget = || {
+            Box::new(MonitorWidget {
+                output: Some("A".to_string()),
+                clicks: Rc::new(Cell::new(0)),
+            }) as Box<dyn RenderWidget>
+        };
+        let mut left = vec![widget()];
+        let mut center = vec![widget()];
+        let mut right = vec![widget()];
+
+        let pixels = renderer.render(100, 30, None, &mut left, &mut center, &mut right);
+        assert_eq!(pixels.len(), 100 * 30 * 4);
     }
 
     #[test]
