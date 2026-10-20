@@ -15,7 +15,6 @@ pub struct Workspace {
     active_indicator_at_top: bool,
     padding: u32,
     spacing: u32,
-    all_monitors: bool,
     monitor_name: Option<String>,
     workspace_targets: HashMap<Option<String>, Vec<WorkspaceTarget>>,
     state: Option<WorkspaceState>,
@@ -81,7 +80,6 @@ impl Workspace {
             },
             padding: config.padding,
             spacing: config.spacing,
-            all_monitors: config.all_monitors,
             monitor_name: None,
             workspace_targets: HashMap::new(),
             state: None,
@@ -120,7 +118,7 @@ impl Widget for Workspace {
         };
 
         let active_id = state.active_id.to_string();
-        let workspaces = render_workspaces(state, self.monitor_name.as_deref(), self.all_monitors);
+        let workspaces = render_workspaces(state, self.monitor_name.as_deref());
         self.workspace_targets.insert(
             self.monitor_name.clone(),
             workspaces.iter().map(WorkspaceTarget::from).collect(),
@@ -188,11 +186,7 @@ impl Widget for Workspace {
     }
 }
 
-fn render_workspaces(
-    state: &WorkspaceState,
-    monitor_name: Option<&str>,
-    all_monitors: bool,
-) -> Vec<RenderedWorkspace> {
+fn render_workspaces(state: &WorkspaceState, monitor_name: Option<&str>) -> Vec<RenderedWorkspace> {
     let mut monitor_indices = std::collections::HashMap::new();
     // Each bar should bold the workspace currently shown on its monitor,
     // independently of which monitor is globally focused.
@@ -206,13 +200,7 @@ fn render_workspaces(
     state
         .workspaces
         .iter()
-        .filter(|workspace| {
-            if let Some(monitor_name) = monitor_name {
-                workspace.monitor == monitor_name
-            } else {
-                all_monitors || workspace.monitor_id == state.active_monitor_id
-            }
-        })
+        .filter(|workspace| monitor_name.is_none_or(|name| workspace.monitor == name))
         .map(|workspace| {
             let index = monitor_indices.entry(workspace.monitor_id).or_insert(0);
             *index += 1;
@@ -277,30 +265,7 @@ mod tests {
             active_ids: HashMap::from([("DP-1".to_string(), 2), ("HDMI-A-1".to_string(), 11)]),
         };
         assert_eq!(
-            render_workspaces(&state, None, false),
-            vec![
-                RenderedWorkspace {
-                    id: 1,
-                    monitor: "DP-1".to_string(),
-                    local_index: Some(1),
-                    text: "1".to_string(),
-                    active: false,
-                    active_on_monitor: false,
-                    urgent: false
-                },
-                RenderedWorkspace {
-                    id: 2,
-                    monitor: "DP-1".to_string(),
-                    local_index: None,
-                    text: "dev".to_string(),
-                    active: true,
-                    active_on_monitor: true,
-                    urgent: false
-                },
-            ]
-        );
-        assert_eq!(
-            render_workspaces(&state, None, true),
+            render_workspaces(&state, None),
             vec![
                 RenderedWorkspace {
                     id: 1,
@@ -332,7 +297,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            render_workspaces(&state, Some("HDMI-A-1"), false),
+            render_workspaces(&state, Some("HDMI-A-1")),
             vec![RenderedWorkspace {
                 id: 11,
                 monitor: "HDMI-A-1".to_string(),
@@ -362,7 +327,7 @@ mod tests {
             active_monitor_id: 1,
             active_ids: HashMap::from([("DP-1".to_string(), 1)]),
         };
-        let rendered = render_workspaces(&state, Some("DP-1"), false);
+        let rendered = render_workspaces(&state, Some("DP-1"));
         assert!(rendered.iter().all(|workspace| workspace.active));
         assert!(rendered.iter().all(|workspace| workspace.active_on_monitor));
     }

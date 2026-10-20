@@ -282,9 +282,8 @@ fn workspace_snapshot(
             used[index] = true;
             specs.push(WorkspaceSpec::from(workspace));
         } else {
-            // A missing workspace is placed on the focused output so it is
-            // visible with the default all-monitors setting and can be
-            // created by clicking its button.
+            // A missing workspace is placed on the focused output so it can
+            // be created by clicking its button on that output's bar.
             specs.push(WorkspaceSpec {
                 name: name.clone(),
                 output: fallback_output.clone(),
