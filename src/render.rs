@@ -112,7 +112,7 @@ impl PreparedItem {
             .button
             .icon
             .as_ref()
-            .map_or(0, |icon| icon.width as i32);
+            .map_or(0, |icon| layout_i32(icon.width));
         self.text_width
             .max(icon_width)
             .saturating_add(self.padding.saturating_mul(2))
@@ -216,8 +216,8 @@ impl BarRenderer {
         alignment: Alignment,
     ) {
         let mut items = self.prepare_items(widgets, metrics);
-        let module_spacing = self.config.module_spacing as i32;
-        let item_spacing = self.config.item_spacing as i32;
+        let module_spacing = layout_i32(self.config.module_spacing);
+        let item_spacing = layout_i32(self.config.item_spacing);
         let total_width = items
             .iter()
             .map(PreparedItem::width)
@@ -232,9 +232,9 @@ impl BarRenderer {
             }))
             .fold(0_i32, i32::saturating_add);
         let mut cursor = match alignment {
-            Alignment::Left => self.config.bar_padding as i32,
-            Alignment::Center => (metrics.width as i32 - total_width) / 2,
-            Alignment::Right => metrics.width.saturating_sub(self.config.bar_padding) as i32,
+            Alignment::Left => layout_i32(self.config.bar_padding),
+            Alignment::Center => (layout_i32(metrics.width) - total_width) / 2,
+            Alignment::Right => layout_i32(metrics.width.saturating_sub(self.config.bar_padding)),
         };
 
         if matches!(alignment, Alignment::Right) {
@@ -276,15 +276,16 @@ impl BarRenderer {
                 }],
                 RenderContent::Buttons(buttons) => buttons,
             };
-            let content_spacing = widget.content_spacing().map(|spacing| spacing as i32);
+            let content_spacing = widget.content_spacing().map(layout_i32);
             for (button_index, mut button) in buttons.into_iter().enumerate() {
-                let button_padding = button.padding.unwrap_or(self.config.item_padding) as i32;
+                let button_padding = layout_i32(button.padding.unwrap_or(self.config.item_padding));
                 let button_padding = button.max_width.map_or(button_padding, |max_width| {
-                    button_padding.min(max_width as i32 / 2)
+                    button_padding.min(layout_i32(max_width) / 2)
                 });
                 let text_width = if let Some(text) = button.text.take() {
                     let (text, width) = if let Some(max_width) = button.max_width {
-                        let available = max_width as i32 - button_padding * 2;
+                        let available =
+                            layout_i32(max_width).saturating_sub(button_padding.saturating_mul(2));
                         self.fit_text(
                             &text,
                             available,
@@ -355,7 +356,7 @@ impl BarRenderer {
             let icon_x = match alignment {
                 Alignment::Right => right
                     .saturating_sub(item.padding)
-                    .saturating_sub(icon.width as i32),
+                    .saturating_sub(layout_i32(icon.width)),
                 Alignment::Left | Alignment::Center => left.saturating_add(item.padding),
             };
             self.draw_icon(pixmap, icon, icon_x);
@@ -381,7 +382,7 @@ impl BarRenderer {
         paint.set_color_rgba8(r, g, b, a);
 
         let left = left.max(0) as f32;
-        let right = right.min(pixmap.width() as i32) as f32;
+        let right = right.min(layout_i32(pixmap.width())) as f32;
         let width = right - left;
         if width <= 0.0 {
             return;
@@ -410,7 +411,7 @@ impl BarRenderer {
         let mut paint = Paint::default();
         paint.set_color_rgba8(r, g, b, a);
         let left = left.max(0) as f32;
-        let right = right.min(pixmap.width() as i32) as f32;
+        let right = right.min(layout_i32(pixmap.width())) as f32;
         let width = right - left;
         if width <= 0.0 {
             return;
@@ -521,6 +522,8 @@ impl BarRenderer {
         let x = right.saturating_sub(text_width);
 
         let text_y = ((metrics.height as f32 - line_height) / 2.0).max(0.0) as i32;
+        let pixmap_width = layout_i32(pixmap.width());
+        let pixmap_height = layout_i32(pixmap.height());
         buffer.draw(
             &mut self.font_system,
             &mut self.swash_cache,
@@ -528,7 +531,7 @@ impl BarRenderer {
             |glyph_x, glyph_y, _w, _h, color| {
                 let px = x.saturating_add(glyph_x);
                 let py = text_y.saturating_add(glyph_y);
-                if px < 0 || py < 0 || px >= pixmap.width() as i32 || py >= pixmap.height() as i32 {
+                if px < 0 || py < 0 || px >= pixmap_width || py >= pixmap_height {
                     return;
                 }
                 let pixel = (py as u32 * pixmap.width() + px as u32) as usize * 4;
@@ -560,12 +563,14 @@ impl BarRenderer {
         {
             return;
         }
-        let y = ((pixmap.height() as i32 - icon.height as i32) / 2).max(0);
+        let pixmap_width = layout_i32(pixmap.width());
+        let pixmap_height = layout_i32(pixmap.height());
+        let y = (pixmap_height.saturating_sub(layout_i32(icon.height)) / 2).max(0);
         for iy in 0..icon.height {
             for ix in 0..icon.width {
-                let px = x.saturating_add(ix as i32);
-                let py = y.saturating_add(iy as i32);
-                if px < 0 || py < 0 || px >= pixmap.width() as i32 || py >= pixmap.height() as i32 {
+                let px = x.saturating_add(layout_i32(ix));
+                let py = y.saturating_add(layout_i32(iy));
+                if px < 0 || py < 0 || px >= pixmap_width || py >= pixmap_height {
                     continue;
                 }
                 let source = (iy as usize * icon.width as usize + ix as usize) * 4;
@@ -599,6 +604,10 @@ impl BarRenderer {
 
 fn native_argb8888([red, green, blue, alpha]: [u8; 4]) -> [u8; 4] {
     u32::from_be_bytes([alpha, red, green, blue]).to_ne_bytes()
+}
+
+fn layout_i32(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 fn next_spacing(
@@ -711,8 +720,8 @@ mod tests {
     use std::{cell::Cell, rc::Rc};
 
     use super::{
-        BarRenderer, MouseButton, RenderButton, RenderContent, RenderMetrics, RenderWidget,
-        UnicodeSegmentation,
+        BarRenderer, MouseButton, RenderButton, RenderContent, RenderIcon, RenderMetrics,
+        RenderWidget, UnicodeSegmentation,
     };
     use crate::config::StyleConfig;
 
@@ -781,6 +790,43 @@ mod tests {
         }
     }
 
+    struct ExtremeLayoutWidget;
+
+    impl RenderWidget for ExtremeLayoutWidget {
+        fn content(&mut self) -> RenderContent {
+            RenderContent::Buttons(vec![
+                RenderButton {
+                    text: Some("text".to_string()),
+                    icon: None,
+                    padding: Some(u32::MAX),
+                    max_width: Some(u32::MAX),
+                    bold: None,
+                    color: None,
+                    background: None,
+                    indicator: None,
+                },
+                RenderButton {
+                    text: None,
+                    icon: Some(RenderIcon {
+                        width: u32::MAX,
+                        height: 1,
+                        pixels: Vec::new(),
+                    }),
+                    padding: None,
+                    max_width: None,
+                    bold: None,
+                    color: None,
+                    background: None,
+                    indicator: None,
+                },
+            ])
+        }
+
+        fn content_spacing(&self) -> Option<u32> {
+            Some(u32::MAX)
+        }
+    }
+
     #[test]
     fn positions_buttons_in_each_alignment() {
         let mut renderer = BarRenderer::new(&StyleConfig::default()).unwrap();
@@ -818,6 +864,34 @@ mod tests {
         let mut right = vec![widget()];
 
         let pixels = renderer.render(100, 30, None, &mut left, &mut center, &mut right);
+        assert_eq!(pixels.len(), 100 * 30 * 4);
+    }
+
+    #[test]
+    fn clamps_unrestricted_layout_values() {
+        let config = StyleConfig {
+            bar_padding: u32::MAX,
+            item_padding: u32::MAX,
+            module_spacing: u32::MAX,
+            item_spacing: u32::MAX,
+            ..StyleConfig::default()
+        };
+        let mut renderer = BarRenderer::new(&config).unwrap();
+        let metrics = RenderMetrics {
+            width: 100,
+            height: 30,
+            font_size: config.font_size,
+            text_color: renderer.text_color,
+        };
+        let mut widgets: Vec<Box<dyn RenderWidget>> = vec![Box::new(ExtremeLayoutWidget)];
+        let items = renderer.prepare_items(&mut widgets, &metrics);
+        assert_eq!(items[0].content_spacing, Some(i32::MAX));
+        assert_eq!(items[0].padding, i32::MAX / 2);
+        assert_eq!(items[0].width(), i32::MAX - 1);
+        assert_eq!(items[1].padding, i32::MAX);
+        assert_eq!(items[1].width(), i32::MAX);
+
+        let pixels = renderer.render(100, 30, None, &mut widgets, &mut [], &mut []);
         assert_eq!(pixels.len(), 100 * 30 * 4);
     }
 
