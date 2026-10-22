@@ -13,8 +13,8 @@ use crate::{
     provider::wm::{self, WmClient},
     render::BarRenderer,
     widget::{
-        WidgetGroups, battery::Battery, clock::Clock, cpu::Cpu, memory::Memory, tray::Tray,
-        volume::Volume, window::Window, workspace::Workspace,
+        WidgetGroups, battery::Battery, clock::Clock, cpu::Cpu, memory::Memory, process::Process,
+        tray::Tray, volume::Volume, window::Window, workspace::Workspace,
     },
 };
 use shell_surface::{
@@ -415,6 +415,7 @@ fn reusable(name: &str, old: &Config, new: &Config) -> bool {
         Some(ModuleKind::Battery) => old.battery == new.battery,
         Some(ModuleKind::Memory) => old.memory == new.memory,
         Some(ModuleKind::Cpu) => old.cpu == new.cpu,
+        Some(ModuleKind::Process) => old.process == new.process,
         Some(ModuleKind::Volume) => old.volume == new.volume,
         Some(ModuleKind::Workspace) => old.workspace == new.workspace,
         Some(ModuleKind::Window) => {
@@ -443,6 +444,9 @@ fn create_widget(
             Ok(Box::new(Memory::new(&config.memory)) as Box<dyn crate::widget::Widget>)
         }
         ModuleKind::Cpu => Ok(Box::new(Cpu::new(&config.cpu)) as Box<dyn crate::widget::Widget>),
+        ModuleKind::Process => {
+            Ok(Box::new(Process::new(&config.process)) as Box<dyn crate::widget::Widget>)
+        }
         ModuleKind::Volume => {
             Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>)
         }

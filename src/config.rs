@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::color::parse_rgba;
 use crate::module::ModuleKind;
-use crate::provider::{cpu, memory, tray};
+use crate::provider::{cpu, memory, process, tray};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
@@ -13,6 +13,7 @@ pub struct Config {
     pub clock: ClockConfig,
     pub cpu: CpuConfig,
     pub memory: MemoryConfig,
+    pub process: ProcessConfig,
     pub modules: ModulesConfig,
     pub style: StyleConfig,
     pub tray: TrayConfig,
@@ -77,6 +78,24 @@ impl Default for MemoryConfig {
         Self {
             provider: "auto".to_string(),
             format: "{used}/{total} GiB 󰍛".to_string(),
+            refresh_seconds: 5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ProcessConfig {
+    pub provider: String,
+    pub format: String,
+    pub refresh_seconds: u64,
+}
+
+impl Default for ProcessConfig {
+    fn default() -> Self {
+        Self {
+            provider: "auto".to_string(),
+            format: "{count} 󰒓".to_string(),
             refresh_seconds: 5,
         }
     }
@@ -300,6 +319,11 @@ impl Config {
             return Err("cpu.refresh_seconds must be greater than zero".to_string());
         }
         cpu::validate_name(&self.cpu.provider).map_err(|error| format!("cpu.provider: {error}"))?;
+        if self.process.refresh_seconds == 0 {
+            return Err("process.refresh_seconds must be greater than zero".to_string());
+        }
+        process::validate_name(&self.process.provider)
+            .map_err(|error| format!("process.provider: {error}"))?;
         if self.volume.scroll_step == 0 || self.volume.scroll_step > 100 {
             return Err("volume.scroll_step must be between 1 and 100".to_string());
         }
@@ -458,6 +482,33 @@ mod tests {
         assert!(Config::parse("[cpu]\nprovider = 'linux'\n").is_ok());
         #[cfg(target_os = "freebsd")]
         assert!(Config::parse("[cpu]\nprovider = 'freebsd'\n").is_ok());
+    }
+
+    #[test]
+    fn accepts_process_module_and_validates_configuration() {
+        assert_eq!(Config::default().process.format, "{count} 󰒓");
+        let config = Config::parse(
+            "[modules]\nright = ['process']\n[process]\nformat = '{count} tasks'\nrefresh_seconds = 3\n",
+        )
+        .unwrap();
+        assert_eq!(config.modules.right, ["process"]);
+        assert_eq!(config.process.format, "{count} tasks");
+        assert_eq!(config.process.provider, "auto");
+
+        let mut config = config;
+        config.process.refresh_seconds = 0;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("process.refresh_seconds")
+        );
+        assert!(
+            Config::parse("[process]\nprovider = 'unknown'\n")
+                .unwrap_err()
+                .to_string()
+                .contains("process.provider")
+        );
     }
 
     #[test]
