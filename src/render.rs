@@ -216,7 +216,7 @@ impl BarRenderer {
         alignment: Alignment,
     ) {
         let mut items = self.prepare_items(widgets, metrics);
-        let module_spacing = layout_i32(self.config.module_spacing);
+        let widget_spacing = layout_i32(self.config.widget_spacing);
         let item_spacing = layout_i32(self.config.item_spacing);
         let total_width = items
             .iter()
@@ -226,7 +226,7 @@ impl BarRenderer {
                     pair[0].widget_index,
                     pair[1].widget_index,
                     pair[0].content_spacing,
-                    module_spacing,
+                    widget_spacing,
                     item_spacing,
                 )
             }))
@@ -247,7 +247,7 @@ impl BarRenderer {
                 Alignment::Left | Alignment::Center => (cursor, cursor.saturating_add(width)),
             };
             self.draw_prepared_item(pixmap, item, metrics, alignment, left, right);
-            let spacing = next_spacing_for_position(&items, position, module_spacing, item_spacing);
+            let spacing = next_spacing_for_position(&items, position, widget_spacing, item_spacing);
             cursor = match alignment {
                 Alignment::Right => left.saturating_sub(spacing),
                 Alignment::Left | Alignment::Center => right.saturating_add(spacing),
@@ -614,20 +614,20 @@ fn next_spacing(
     current_index: usize,
     next_index: usize,
     content_spacing: Option<i32>,
-    module_spacing: i32,
+    widget_spacing: i32,
     item_spacing: i32,
 ) -> i32 {
     if current_index == next_index {
         content_spacing.unwrap_or(item_spacing)
     } else {
-        module_spacing
+        widget_spacing
     }
 }
 
 fn next_spacing_for_position(
     items: &[PreparedItem],
     position: usize,
-    module_spacing: i32,
+    widget_spacing: i32,
     item_spacing: i32,
 ) -> i32 {
     items.get(position + 1).map_or(0, |next| {
@@ -635,7 +635,7 @@ fn next_spacing_for_position(
             items[position].widget_index,
             next.widget_index,
             items[position].content_spacing,
-            module_spacing,
+            widget_spacing,
             item_spacing,
         )
     })
@@ -872,7 +872,7 @@ mod tests {
         let config = StyleConfig {
             bar_padding: u32::MAX,
             item_padding: u32::MAX,
-            module_spacing: u32::MAX,
+            widget_spacing: u32::MAX,
             item_spacing: u32::MAX,
             ..StyleConfig::default()
         };

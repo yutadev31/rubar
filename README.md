@@ -41,7 +41,7 @@ The `cpu`, `memory`, `process`, and `battery` widgets select FreeBSD providers a
 Create `~/.config/rubar/config.toml` (or `$XDG_CONFIG_HOME/rubar/config.toml` when `XDG_CONFIG_HOME` is set). For example:
 
 ```toml
-[modules]
+[widgets]
 left = ["workspace", "window"]
 center = ["clock"]
 right = ["cpu", "memory", "process", "battery", "volume", "tray"]
@@ -53,6 +53,7 @@ format = "%a %d %b %H:%M"
 [style]
 height = 30
 font_size = 14
+widget_spacing = 12
 
 [style.colors]
 bg = "#24283b"
@@ -60,6 +61,8 @@ text = "#c0caf5"
 ```
 
 The `left`, `center`, and `right` arrays set the widgets and their order. All three arrays are empty by default, so add the widgets you want to display. Missing settings use built-in defaults. Changes to the configuration file are reloaded while the bar is running; if a reload fails, the current settings remain active.
+
+For existing configurations, rename `[modules]` to `[widgets]` and `style.module_spacing` to `style.widget_spacing`.
 
 The `process` widget shows the total number of processes. It counts PID entries in `/proc` on Linux and queries the process table on FreeBSD. On Linux, a procfs mount with `hidepid=2` (or another mode that hides PID directories) makes the widget unavailable and logs an error instead of displaying a partial count. Its default format is `{count} 󰒓`, refreshed every five seconds. For example:
 
