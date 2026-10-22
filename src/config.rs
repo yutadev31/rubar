@@ -95,7 +95,7 @@ impl Default for ProcessConfig {
     fn default() -> Self {
         Self {
             provider: "auto".to_string(),
-            format: "{count} processes".to_string(),
+            format: "{count} 󰒓".to_string(),
             refresh_seconds: 5,
         }
     }
@@ -486,6 +486,7 @@ mod tests {
 
     #[test]
     fn accepts_process_module_and_validates_configuration() {
+        assert_eq!(Config::default().process.format, "{count} 󰒓");
         let config = Config::parse(
             "[modules]\nright = ['process']\n[process]\nformat = '{count} tasks'\nrefresh_seconds = 3\n",
         )

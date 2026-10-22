@@ -61,7 +61,7 @@ text = "#c0caf5"
 
 The `left`, `center`, and `right` arrays set the widgets and their order. All three arrays are empty by default, so add the widgets you want to display. Missing settings use built-in defaults. Changes to the configuration file are reloaded while the bar is running; if a reload fails, the current settings remain active.
 
-The `process` widget shows the total number of processes. It counts PID entries in `/proc` on Linux and queries the process table on FreeBSD. Its default format is `{count} processes`, refreshed every five seconds. For example:
+The `process` widget shows the total number of processes. It counts PID entries in `/proc` on Linux and queries the process table on FreeBSD. Its default format is `{count} 󰒓`, refreshed every five seconds. For example:
 
 ```toml
 [process]
