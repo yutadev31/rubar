@@ -1,7 +1,6 @@
 mod app;
 mod color;
 mod config;
-mod module;
 mod provider;
 mod render;
 mod widget;

@@ -9,12 +9,11 @@ use std::{
 
 use crate::{
     config::Config,
-    module::ModuleKind,
     provider::wm::{self, WmClient},
     render::BarRenderer,
     widget::{
-        WidgetGroups, battery::Battery, clock::Clock, cpu::Cpu, memory::Memory, process::Process,
-        tray::Tray, volume::Volume, window::Window, workspace::Workspace,
+        WidgetGroups, WidgetKind, battery::Battery, clock::Clock, cpu::Cpu, memory::Memory,
+        process::Process, tray::Tray, volume::Volume, window::Window, workspace::Workspace,
     },
 };
 use shell_surface::{
@@ -51,9 +50,9 @@ impl App {
         tracing::debug!("initializing window manager client");
         let ipc_client = wm::connect(&config.workspace.persistent_workspaces);
         let widgets = WidgetGroups {
-            left: create_widgets(&config.modules.left, config, &ipc_client)?,
-            center: create_widgets(&config.modules.center, config, &ipc_client)?,
-            right: create_widgets(&config.modules.right, config, &ipc_client)?,
+            left: create_widgets(&config.widgets.left, config, &ipc_client)?,
+            center: create_widgets(&config.widgets.center, config, &ipc_client)?,
+            right: create_widgets(&config.widgets.right, config, &ipc_client)?,
         };
         let config_path = crate::config::config_path();
         let last_contents = config_path
@@ -158,17 +157,17 @@ impl App {
         };
         let available_names: Vec<String> = self
             .active_config
-            .modules
+            .widgets
             .left
             .iter()
-            .chain(&self.active_config.modules.center)
-            .chain(&self.active_config.modules.right)
+            .chain(&self.active_config.widgets.center)
+            .chain(&self.active_config.widgets.right)
             .cloned()
             .chain(self.dormant_trays.iter().map(|(name, _)| name.clone()))
             .collect();
         let mut reserved = vec![false; available_names.len()];
         let left = plan_widgets(
-            &config.modules.left,
+            &config.widgets.left,
             config,
             &self.active_config,
             &ipc_client,
@@ -176,7 +175,7 @@ impl App {
             &mut reserved,
         )?;
         let center = plan_widgets(
-            &config.modules.center,
+            &config.widgets.center,
             config,
             &self.active_config,
             &ipc_client,
@@ -184,7 +183,7 @@ impl App {
             &mut reserved,
         )?;
         let right = plan_widgets(
-            &config.modules.right,
+            &config.widgets.right,
             config,
             &self.active_config,
             &ipc_client,
@@ -216,7 +215,7 @@ impl App {
             .into_iter()
             .zip(available)
             .filter_map(|(name, widget)| {
-                (same_tray_provider && ModuleKind::parse(&name) == Some(ModuleKind::Tray))
+                (same_tray_provider && WidgetKind::parse(&name) == Some(WidgetKind::Tray))
                     .then_some(widget)
                     .flatten()
                     .map(|widget| (name, widget))
@@ -410,19 +409,19 @@ fn materialize_widgets(
 }
 
 fn reusable(name: &str, old: &Config, new: &Config) -> bool {
-    match ModuleKind::parse(name) {
-        Some(ModuleKind::Clock) => old.clock == new.clock,
-        Some(ModuleKind::Battery) => old.battery == new.battery,
-        Some(ModuleKind::Memory) => old.memory == new.memory,
-        Some(ModuleKind::Cpu) => old.cpu == new.cpu,
-        Some(ModuleKind::Process) => old.process == new.process,
-        Some(ModuleKind::Volume) => old.volume == new.volume,
-        Some(ModuleKind::Workspace) => old.workspace == new.workspace,
-        Some(ModuleKind::Window) => {
+    match WidgetKind::parse(name) {
+        Some(WidgetKind::Clock) => old.clock == new.clock,
+        Some(WidgetKind::Battery) => old.battery == new.battery,
+        Some(WidgetKind::Memory) => old.memory == new.memory,
+        Some(WidgetKind::Cpu) => old.cpu == new.cpu,
+        Some(WidgetKind::Process) => old.process == new.process,
+        Some(WidgetKind::Volume) => old.volume == new.volume,
+        Some(WidgetKind::Workspace) => old.workspace == new.workspace,
+        Some(WidgetKind::Window) => {
             old.window == new.window
                 && old.workspace.persistent_workspaces == new.workspace.persistent_workspaces
         }
-        Some(ModuleKind::Tray) => old.tray.provider == new.tray.provider,
+        Some(WidgetKind::Tray) => old.tray.provider == new.tray.provider,
         None => false,
     }
 }
@@ -432,33 +431,33 @@ fn create_widget(
     config: &Config,
     ipc_client: &Arc<dyn WmClient>,
 ) -> Result<Box<dyn crate::widget::Widget>, Box<dyn Error>> {
-    let kind = ModuleKind::parse(name).ok_or_else(|| format!("unknown module `{name}`"))?;
+    let kind = WidgetKind::parse(name).ok_or_else(|| format!("unknown widget `{name}`"))?;
     match kind {
-        ModuleKind::Clock => {
+        WidgetKind::Clock => {
             Ok(Box::new(Clock::new(&config.clock)) as Box<dyn crate::widget::Widget>)
         }
-        ModuleKind::Battery => {
+        WidgetKind::Battery => {
             Ok(Box::new(Battery::new(&config.battery)) as Box<dyn crate::widget::Widget>)
         }
-        ModuleKind::Memory => {
+        WidgetKind::Memory => {
             Ok(Box::new(Memory::new(&config.memory)) as Box<dyn crate::widget::Widget>)
         }
-        ModuleKind::Cpu => Ok(Box::new(Cpu::new(&config.cpu)) as Box<dyn crate::widget::Widget>),
-        ModuleKind::Process => {
+        WidgetKind::Cpu => Ok(Box::new(Cpu::new(&config.cpu)) as Box<dyn crate::widget::Widget>),
+        WidgetKind::Process => {
             Ok(Box::new(Process::new(&config.process)) as Box<dyn crate::widget::Widget>)
         }
-        ModuleKind::Volume => {
+        WidgetKind::Volume => {
             Ok(Box::new(Volume::new(&config.volume)) as Box<dyn crate::widget::Widget>)
         }
-        ModuleKind::Workspace => Ok(Box::new(Workspace::new(
+        WidgetKind::Workspace => Ok(Box::new(Workspace::new(
             &config.workspace,
             Arc::clone(ipc_client),
         )) as Box<dyn crate::widget::Widget>),
-        ModuleKind::Window => Ok(
+        WidgetKind::Window => Ok(
             Box::new(Window::new(&config.window, Arc::clone(ipc_client)))
                 as Box<dyn crate::widget::Widget>,
         ),
-        ModuleKind::Tray => Ok(Box::new(Tray::new(&config.tray, config.style.clone())?)
+        WidgetKind::Tray => Ok(Box::new(Tray::new(&config.tray, config.style.clone())?)
             as Box<dyn crate::widget::Widget>),
     }
 }
@@ -470,11 +469,11 @@ mod tests {
     #[test]
     fn failed_reload_preserves_existing_widgets() {
         let mut config = Config::default();
-        config.modules.left.push("clock".to_string());
+        config.widgets.left.push("clock".to_string());
         let mut app = App::new(&config).unwrap();
 
         let mut invalid = config.clone();
-        invalid.modules.left = vec!["tray".to_string()];
+        invalid.widgets.left = vec!["tray".to_string()];
         invalid.tray.provider = "missing".to_string();
 
         assert!(app.apply_config(&invalid).is_err());

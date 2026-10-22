@@ -3,18 +3,18 @@ use std::{error::Error, fs, path::PathBuf};
 use serde::Deserialize;
 
 use crate::color::parse_rgba;
-use crate::module::ModuleKind;
 use crate::provider::{cpu, memory, process, tray};
+use crate::widget::WidgetKind;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub battery: BatteryConfig,
     pub clock: ClockConfig,
     pub cpu: CpuConfig,
     pub memory: MemoryConfig,
     pub process: ProcessConfig,
-    pub modules: ModulesConfig,
+    pub widgets: WidgetsConfig,
     pub style: StyleConfig,
     pub tray: TrayConfig,
     pub volume: VolumeConfig,
@@ -103,7 +103,7 @@ impl Default for ProcessConfig {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
-pub struct ModulesConfig {
+pub struct WidgetsConfig {
     pub left: Vec<String>,
     pub center: Vec<String>,
     pub right: Vec<String>,
@@ -135,7 +135,7 @@ pub struct StyleConfig {
     pub bold: bool,
     pub bar_padding: u32,
     pub item_padding: u32,
-    pub module_spacing: u32,
+    pub widget_spacing: u32,
     pub item_spacing: u32,
 }
 
@@ -149,7 +149,7 @@ impl Default for StyleConfig {
             bold: false,
             bar_padding: 6,
             item_padding: 6,
-            module_spacing: 12,
+            widget_spacing: 12,
             item_spacing: 4,
         }
     }
@@ -266,21 +266,21 @@ impl Config {
 
     pub fn parse(contents: &str) -> Result<Self, Box<dyn Error>> {
         let mut config: Self = toml::from_str(contents)?;
-        config.ignore_unknown_modules();
+        config.ignore_unknown_widgets();
         config.validate()?;
         Ok(config)
     }
 
-    fn ignore_unknown_modules(&mut self) {
+    fn ignore_unknown_widgets(&mut self) {
         for (group, names) in [
-            ("left", &mut self.modules.left),
-            ("center", &mut self.modules.center),
-            ("right", &mut self.modules.right),
+            ("left", &mut self.widgets.left),
+            ("center", &mut self.widgets.center),
+            ("right", &mut self.widgets.right),
         ] {
             names.retain(|name| {
-                let known = ModuleKind::parse(name).is_some();
+                let known = WidgetKind::parse(name).is_some();
                 if !known {
-                    tracing::error!("modules.{group}: unknown module `{name}`; ignoring");
+                    tracing::error!("widgets.{group}: unknown widget `{name}`; ignoring");
                 }
                 known
             });
@@ -335,7 +335,7 @@ impl Config {
         for (name, value) in [
             ("style.bar_padding", self.style.bar_padding),
             ("style.item_padding", self.style.item_padding),
-            ("style.module_spacing", self.style.module_spacing),
+            ("style.widget_spacing", self.style.widget_spacing),
             ("style.item_spacing", self.style.item_spacing),
             ("workspace.padding", self.workspace.padding),
             ("workspace.spacing", self.workspace.spacing),
@@ -389,15 +389,24 @@ mod tests {
     }
 
     #[test]
-    fn ignores_unknown_modules_and_keeps_known_modules_in_order() {
+    fn ignores_unknown_widgets_and_keeps_known_widgets_in_order() {
         let config = Config::parse(
-            "[modules]\nleft = ['clock', 'missing', 'battery']\ncenter = ['unknown']\nright = ['tray', 'clock']\n",
+            "[widgets]\nleft = ['clock', 'missing', 'battery']\ncenter = ['unknown']\nright = ['tray', 'clock']\n[style]\nwidget_spacing = 18\n",
         )
         .unwrap();
 
-        assert_eq!(config.modules.left, ["clock", "battery"]);
-        assert!(config.modules.center.is_empty());
-        assert_eq!(config.modules.right, ["tray", "clock"]);
+        assert_eq!(config.widgets.left, ["clock", "battery"]);
+        assert!(config.widgets.center.is_empty());
+        assert_eq!(config.widgets.right, ["tray", "clock"]);
+        assert_eq!(config.style.widget_spacing, 18);
+    }
+
+    #[test]
+    fn rejects_old_widget_group_key() {
+        let error = Config::parse("[modules]\nleft = ['clock']\n")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("modules"));
     }
 
     #[test]
@@ -421,9 +430,9 @@ mod tests {
     }
 
     #[test]
-    fn accepts_memory_module_and_validates_refresh_interval() {
+    fn accepts_memory_widget_and_validates_refresh_interval() {
         let config = Config::parse(
-            "[modules]\nright = ['memory']\n[memory]\nformat = '{percent}%'\nrefresh_seconds = 2\n",
+            "[widgets]\nright = ['memory']\n[memory]\nformat = '{percent}%'\nrefresh_seconds = 2\n",
         )
         .unwrap();
         assert_eq!(config.memory.format, "{percent}%");
@@ -455,12 +464,12 @@ mod tests {
     }
 
     #[test]
-    fn accepts_cpu_module_and_validates_configuration() {
+    fn accepts_cpu_widget_and_validates_configuration() {
         let config = Config::parse(
-            "[modules]\nright = ['cpu']\n[cpu]\nformat = '{percent}%'\nrefresh_seconds = 3\n",
+            "[widgets]\nright = ['cpu']\n[cpu]\nformat = '{percent}%'\nrefresh_seconds = 3\n",
         )
         .unwrap();
-        assert_eq!(config.modules.right, ["cpu"]);
+        assert_eq!(config.widgets.right, ["cpu"]);
         assert_eq!(config.cpu.format, "{percent}%");
         assert_eq!(config.cpu.provider, "auto");
 
@@ -485,13 +494,13 @@ mod tests {
     }
 
     #[test]
-    fn accepts_process_module_and_validates_configuration() {
+    fn accepts_process_widget_and_validates_configuration() {
         assert_eq!(Config::default().process.format, "{count} 󰒓");
         let config = Config::parse(
-            "[modules]\nright = ['process']\n[process]\nformat = '{count} tasks'\nrefresh_seconds = 3\n",
+            "[widgets]\nright = ['process']\n[process]\nformat = '{count} tasks'\nrefresh_seconds = 3\n",
         )
         .unwrap();
-        assert_eq!(config.modules.right, ["process"]);
+        assert_eq!(config.widgets.right, ["process"]);
         assert_eq!(config.process.format, "{count} tasks");
         assert_eq!(config.process.provider, "auto");
 
