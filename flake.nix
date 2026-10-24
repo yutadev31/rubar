@@ -48,6 +48,7 @@
         lockfile = builtins.fromTOML (builtins.readFile ./Cargo.lock);
         cpstPackage = builtins.head (builtins.filter (package: package.name == "cpst") lockfile.package);
         rubarPackage = builtins.head (builtins.filter (package: package.name == "rubar") lockfile.package);
+        shotPackage = builtins.head (builtins.filter (package: package.name == "shot") lockfile.package);
 
         cpst = pkgs.rustPlatform.buildRustPackage {
           pname = "cpst";
@@ -92,10 +93,28 @@
             }"
           '';
         };
+
+        shot = pkgs.rustPlatform.buildRustPackage {
+          pname = "shot";
+          version = shotPackage.version;
+          src = ./.;
+
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "--package"
+            "shot"
+          ];
+          cargoTestFlags = [
+            "--package"
+            "shot"
+          ];
+
+          inherit nativeBuildInputs buildInputs;
+        };
       in
       {
         packages = {
-          inherit cpst rubar;
+          inherit cpst rubar shot;
           default = rubar;
         };
 

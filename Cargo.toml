@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/cpst", "crates/rubar", "crates/shell-surface"]
+members = ["crates/cpst", "crates/rubar", "crates/shell-surface", "crates/shot"]
 
 [workspace.package]
 version = "0.4.0"
@@ -20,6 +20,7 @@ chrono = {
 chrono-tz = { version = "0.10", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 cosmic-text = "0.19"
+crossterm = "0.29"
 dirs = "7"
 image = { version = "0.25", default-features = false, features = ["png"] }
 libpulse-binding = "2.30"
@@ -31,6 +32,7 @@ serde_json = "1"
 shell-surface.path = "crates/shell-surface"
 socket2 = "0.6"
 tempfile = "3"
+thiserror = "2"
 tiny-skia = "0.12"
 toml = "1.1"
 tracing = "0.1"
@@ -38,6 +40,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-segmentation = "1"
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+windows-sys = "0.61"
 x11rb = { version = "0.14", features = ["allow-unsafe-code"] }
 zbus = {
   version = "5",
