@@ -45,18 +45,23 @@
           wayland
         ];
 
+        lockfile = builtins.fromTOML (builtins.readFile ./Cargo.lock);
+        rubarPackage = builtins.head (builtins.filter (package: package.name == "rubar") lockfile.package);
+
         rubar = pkgs.rustPlatform.buildRustPackage {
           pname = "rubar";
-          version = "0.4.0";
+          version = rubarPackage.version;
           src = ./.;
 
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-
-            outputHashes = {
-              "shell-surface-0.1.0" = "sha256-F09JrQE40C3b/MxCesGQK8lOxyiX2cgE/GIfsh3g6ss=";
-            };
-          };
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "--package"
+            "rubar"
+          ];
+          cargoTestFlags = [
+            "--package"
+            "rubar"
+          ];
 
           inherit nativeBuildInputs buildInputs;
 
