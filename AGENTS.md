@@ -2,39 +2,40 @@
 
 ## Project Overview
 
-`rubar` is a Rust-based status bar application. It renders widgets such as a clock, battery status, workspace information, and audio volume, and loads its configuration through the project's configuration module.
+`rudesktop` is a Rust monorepo for desktop software. The repository currently contains `rubar`, a configurable status bar for Wayland and X11, and `shell-surface`, a reusable library for native desktop surfaces. More applications and shared crates may be added to the workspace. Do not assume that repository-wide code or instructions belong only to `rubar`.
 
 ## Repository Layout
 
-- `src/main.rs`: Application entry point.
-- `src/app.rs`: Application lifecycle and shell integration.
-- `src/config.rs`: Configuration loading and parsing.
-- `src/render.rs`: Rendering support.
-- `src/widget/`: Individual status bar widgets and their providers.
-- `Cargo.toml`: Rust package metadata and dependencies.
-- `flake.nix`: Reproducible development shell definition.
+- `Cargo.toml`: Cargo workspace members, shared package metadata, and shared dependencies.
+- `Cargo.lock`: Lockfile for the workspace.
+- `crates/rubar/`: The `rubar` application. Its `src/main.rs` is the entry point; `src/app.rs` manages the lifecycle; `src/config.rs` loads configuration; `src/render.rs` renders the bar; `src/widget/` contains widgets; and `src/provider/` contains platform and service integrations. See `crates/rubar/README.md` for usage and configuration.
+- `crates/shell-surface/`: Shared surface and input abstraction. `src/lib.rs` defines the API, and `src/backend/` contains Wayland and X11 backends.
+- `flake.nix`: Nix development shell and package definitions. The packaged application is currently `rubar`.
+- `.github/workflows/ci.yml`: Workspace checks and the current `rubar` release workflow.
+
+When adding software, give it its own crate under `crates/` and register it in the root workspace manifest. Keep application-specific behavior in its application crate; move code into a shared crate when it has a clear reusable purpose. Update affected documentation, Nix definitions, and CI or release workflows as needed.
 
 ## Development Workflow
 
-Use the Nix development shell when available:
+Run commands from the repository root. Use the Nix development shell when available:
 
 ```sh
 nix develop
 ```
 
-Format and validate the project with Cargo before submitting changes:
+Format and validate the workspace before submitting changes:
 
 ```sh
-cargo fmt --check
-cargo check
-cargo clippy
-cargo test
+cargo fmt --all --check
+cargo check --workspace --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-Run the application locally with:
+For a focused change, use `cargo check -p <package>` or `cargo test -p <package>` while developing, then run the relevant workspace checks. Run `rubar` with:
 
 ```sh
-cargo run
+cargo run -p rubar
 ```
 
 ## Development Principles
