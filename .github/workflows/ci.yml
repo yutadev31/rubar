@@ -6,7 +6,6 @@ on:
       - main
     tags:
       - 'v*'
-      - '*-v*'
   pull_request:
     branches:
       - main
@@ -51,37 +50,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   release:
-    name: Release rubar
-    if: startsWith(github.ref, 'refs/tags/rubar-v') || startsWith(github.ref, 'refs/tags/v')
-    needs: check
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes libpulse-dev libwayland-dev libxcb1-dev pkg-config
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build Linux x86_64 binary
-        run: cargo build --release --locked --package rubar
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes target/release/rubar
-
-  release-cpst:
-    name: Release cpst
-    if: startsWith(github.ref, 'refs/tags/cpst-v')
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: check
     runs-on: ubuntu-latest
     permissions:
@@ -101,38 +71,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build Linux x86_64 binaries
-        run: cargo build --release --locked --package cpst
+        run: cargo build --release --workspace --locked
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes target/release/cpy target/release/pst
-
-  release-shot:
-    name: Release shot
-    if: startsWith(github.ref, 'refs/tags/shot-v')
-    needs: check
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes libpulse-dev libwayland-dev libxcb1-dev pkg-config
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build Linux x86_64 binary
-        run: cargo build --release --locked --package shot
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes target/release/shot
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes target/release/cpy target/release/pst target/release/rubar target/release/shot
