@@ -1,0 +1,10 @@
+[package]
+name = "cpst"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+arboard = { version = "3.6", features = ["wayland-data-control"] }
+clap = { version = "4.5", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

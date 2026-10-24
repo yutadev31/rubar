@@ -2,16 +2,17 @@
 
 ## Project Overview
 
-`rudesktop` is a Rust monorepo for desktop software. The repository currently contains `rubar`, a configurable status bar for Wayland and X11, and `shell-surface`, a reusable library for native desktop surfaces. More applications and shared crates may be added to the workspace. Do not assume that repository-wide code or instructions belong only to `rubar`.
+`rudesktop` is a Rust monorepo for desktop software. The repository currently contains `cpst`, clipboard command-line tools; `rubar`, a configurable status bar for Wayland and X11; and `shell-surface`, a reusable library for native desktop surfaces. More applications and shared crates may be added to the workspace. Do not assume that repository-wide code or instructions belong only to `rubar`.
 
 ## Repository Layout
 
 - `Cargo.toml`: Cargo workspace members, shared package metadata, and shared dependencies.
 - `Cargo.lock`: Lockfile for the workspace.
+- `crates/cpst/`: The `cpst` package. Its `src/lib.rs` contains shared clipboard operations; `src/bin/` contains the `cpy` and `pst` commands. See `crates/cpst/README.md` for usage.
 - `crates/rubar/`: The `rubar` application. Its `src/main.rs` is the entry point; `src/app.rs` manages the lifecycle; `src/config.rs` loads configuration; `src/render.rs` renders the bar; `src/widget/` contains widgets; and `src/provider/` contains platform and service integrations. See `crates/rubar/README.md` for usage and configuration.
 - `crates/shell-surface/`: Shared surface and input abstraction. `src/lib.rs` defines the API, and `src/backend/` contains Wayland and X11 backends.
-- `flake.nix`: Nix development shell and package definitions. The packaged application is currently `rubar`.
-- `.github/workflows/ci.yml`: Workspace checks and the current `rubar` release workflow.
+- `flake.nix`: Nix development shell and package definitions for `cpst` and `rubar`.
+- `.github/workflows/ci.yml`: Workspace checks and release workflows for `cpst` and `rubar`.
 
 When adding software, give it its own crate under `crates/` and register it in the root workspace manifest. Keep application-specific behavior in its application crate; move code into a shared crate when it has a clear reusable purpose. Update affected documentation, Nix definitions, and CI or release workflows as needed.
 
