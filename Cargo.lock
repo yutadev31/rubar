@@ -1284,8 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "shell-surface"
-version = "0.1.0"
-source = "git+https://github.com/yutadev31/shell-surface.git?rev=247b682dbeff5b0b3726ec8291d6514d2a8a574a#247b682dbeff5b0b3726ec8291d6514d2a8a574a"
+version = "0.4.0"
 dependencies = [
  "memmap2",
  "tempfile",

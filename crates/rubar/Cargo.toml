@@ -1,0 +1,28 @@
+[package]
+name = "rubar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+chrono-tz.workspace = true
+cosmic-text.workspace = true
+dirs.workspace = true
+libpulse-binding.workspace = true
+png.workspace = true
+resvg.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shell-surface.workspace = true
+socket2.workspace = true
+tiny-skia.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+unicode-segmentation.workspace = true
+x11rb.workspace = true
+zbus.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
