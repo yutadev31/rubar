@@ -1,0 +1,35 @@
+[package]
+name = "shot"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[features]
+default = ["wayland", "x11", "windows"]
+wayland = ["dep:wayland-client", "dep:wayland-protocols-wlr"]
+x11 = ["dep:x11rb"]
+windows = ["dep:windows-sys"]
+
+[dependencies]
+arboard.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+dirs.workspace = true
+image.workspace = true
+memmap2.workspace = true
+serde.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
+wayland-client = { workspace = true, optional = true }
+wayland-protocols-wlr = { workspace = true, optional = true }
+x11rb = { workspace = true, features = ["image", "randr"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+], optional = true }
