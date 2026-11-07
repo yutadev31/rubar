@@ -1,10 +1,10 @@
 mod app;
 mod color;
 mod config;
+mod desktop_icons;
 mod provider;
 mod render;
 mod widget;
-mod desktop_icons;
 
 use std::error::Error;
 
