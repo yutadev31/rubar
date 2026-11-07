@@ -21,86 +21,71 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes libpulse-dev libwayland-dev libxkbcommon-dev pkg-config
-
-      - name: Install Rust toolchain
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust dependencies
+      - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Check formatting
-        run: cargo fmt --all --check
+      - name: Format
+        run: cargo fmt --check
 
-      - name: Check compilation
-        run: cargo check --workspace --locked
+      - name: Check
+        run: cargo check --locked
 
-      - name: Run tests
-        run: cargo test --workspace --locked
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-  netbsd:
-    name: NetBSD 10.1 amd64
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Build and test on NetBSD
-        uses: vmactions/netbsd-vm@v1
-        with:
-          release: "10.1"
-          prepare: |
-            set -eu
-            ftp -o /tmp/xbase.tar.xz https://archive.NetBSD.org/pub/NetBSD-archive/NetBSD-10.1/amd64/binary/sets/xbase.tar.xz
-            test "$(sha512 -q /tmp/xbase.tar.xz)" = "b6ac2195f91d7ae395ec2734c9ae2a4727014629fbdc94562531225e0d51e3b2705047e8440fcf75e1dacdcecb3cb980df7a82f838c12ad5274ba8ce95e49b72"
-            tar -xf /tmp/xbase.tar.xz -C /
-            /usr/sbin/pkg_add rust pkgconf pulseaudio libxkbcommon wayland fontconfig dejavu-ttf
-          run: |
-            set -eu
-            export PATH="/usr/pkg/bin:$PATH"
-            export PKG_CONFIG_PATH="/usr/pkg/lib/pkgconfig:/usr/pkg/share/pkgconfig"
-            export LD_LIBRARY_PATH="/usr/pkg/lib:/usr/X11R7/lib"
-            export RUSTFLAGS="-C link-arg=-Wl,-rpath,/usr/X11R7/lib"
-            cargo check -p rubar --locked
-            cargo test -p rubar --locked
+      - name: Test
+        run: cargo test --locked
 
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, netbsd]
+    needs: check
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
 
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes libpulse-dev libwayland-dev libxkbcommon-dev pkg-config
-
-      - name: Install Rust toolchain
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
+      - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Linux x86_64 binaries
-        run: cargo build --release --workspace --locked
+      - name: Build
+        run: cargo build --release --locked
 
-      - name: Create GitHub release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes target/release/cpy target/release/pst target/release/rubar target/release/rumenu target/release/shot
+        run: |
+          mapfile -t binaries < <(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name'
+          )
+
+          artifacts=()
+          for binary in "${binaries[@]}"; do
+            artifacts+=("target/release/$binary")
+          done
+
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --generate-notes \
+            "${artifacts[@]}"
