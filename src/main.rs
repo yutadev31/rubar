@@ -4,6 +4,7 @@ mod config;
 mod provider;
 mod render;
 mod widget;
+mod desktop_icons;
 
 use std::error::Error;
 

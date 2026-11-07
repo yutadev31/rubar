@@ -1,8 +1,3 @@
-//! Shared icon lookup and decoding for desktop applications.
-//!
-//! Pixels are RGBA with premultiplied color channels, matching tiny-skia and
-//! rubar's render pipeline.
-
 use std::{
     collections::HashSet,
     env, fs,
@@ -24,6 +19,7 @@ pub struct Icon {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RasterSize {
     Original,
+    #[allow(unused)]
     Target,
 }
 

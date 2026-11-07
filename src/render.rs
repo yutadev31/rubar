@@ -1,10 +1,10 @@
 use std::{collections::HashMap, error::Error};
 
+pub use crate::desktop_icons::Icon as RenderIcon;
 use cosmic_text::{
     Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Shaping, SwashCache, Weight,
     Wrap,
 };
-pub use desktop_icons::Icon as RenderIcon;
 use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 use unicode_segmentation::UnicodeSegmentation;
 

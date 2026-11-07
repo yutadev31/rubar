@@ -511,10 +511,10 @@ fn load_named_icon(name: &str, target: u32) -> Option<TrayIcon> {
         return None;
     }
 
-    desktop_icons::Loader::new(["hicolor", "Adwaita", "Papirus", "breeze"]).load(
+    crate::desktop_icons::Loader::new(["hicolor", "Adwaita", "Papirus", "breeze"]).load(
         name,
         target,
-        desktop_icons::RasterSize::Original,
+        crate::desktop_icons::RasterSize::Original,
     )
 }
 

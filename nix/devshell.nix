@@ -1,7 +1,6 @@
 {
   pkgs,
   inputs,
-  perSystem,
   system,
   ...
 }:
@@ -10,7 +9,8 @@ let
     inherit system;
     overlays = [ inputs.rust-overlay.overlays.default ];
   };
-  rust = rustPkgs.rust-bin.stable.latest.default.override {
+
+  rustToolchain = rustPkgs.rust-bin.stable.latest.default.override {
     extensions = [
       "rust-src"
       "rust-analyzer"
@@ -18,13 +18,25 @@ let
   };
 in
 pkgs.mkShell {
-  inputsFrom = [ perSystem.self.rubar ];
   packages = with pkgs; [
-    rust
-    tombi
     nixd
     nixfmt
     typos-lsp
+    tombi
+
+    rustToolchain
+
+    libpulseaudio
+    libxkbcommon
+    wayland
   ];
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath perSystem.self.rubar.buildInputs;
+
+  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+    with pkgs;
+    [
+      libpulseaudio
+      libxkbcommon
+      wayland
+    ]
+  );
 }
