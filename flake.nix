@@ -1,18 +1,32 @@
 {
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    treefmt-nix.url = "github:numtide/treefmt-nix";
-    rust-overlay.url = "github:oxalica/rust-overlay";
-    blueprint = {
-      url = "github:numtide/blueprint";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
+  inputs.rustdev-nix.url = "github:yutadev31/rustdev-nix";
 
   outputs =
     inputs:
-    inputs.blueprint {
+    inputs.rustdev-nix.lib.mkFlake {
       inherit inputs;
-      prefix = "nix/";
+      src = ./.;
+
+      packageAttrs = { pkgs, ... }: {
+        cargoLock = {
+          outputHashes = {
+            "shell-surface-0.1.0" = "sha256-GwfvexzP2rXtpI0txXHNlKnZ/VNot9kieEY/FMnIimo=";
+          };
+        };
+
+        preCheck = ''
+          export FONTCONFIG_FILE="${pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; }}"
+        '';
+
+        nativeBuildInputs = [
+          pkgs.pkg-config
+        ];
+
+        buildInputs = [
+          pkgs.libpulseaudio
+          pkgs.libxkbcommon
+          pkgs.wayland
+        ];
+      };
     };
 }
