@@ -9,13 +9,18 @@ pkgs.rustPlatform.buildRustPackage {
   inherit pname;
   inherit (package) version;
   src = ../../.;
-  cargoLock.lockFile = ../../Cargo.lock;
+  cargoLock = {
+    lockFile = ../../Cargo.lock;
+    outputHashes = {
+      "shell-surface-0.1.0" = "sha256-GwfvexzP2rXtpI0txXHNlKnZ/VNot9kieEY/FMnIimo=";
+    };
+  };
 
   nativeBuildInputs = [
-  pkgs.pkg-config
+    pkgs.pkg-config
   ];
 
-  buildInputs =  [
+  buildInputs = [
     pkgs.libpulseaudio
     pkgs.libxkbcommon
     pkgs.wayland
