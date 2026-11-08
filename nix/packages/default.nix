@@ -16,6 +16,10 @@ pkgs.rustPlatform.buildRustPackage {
     };
   };
 
+  preCheck = ''
+    export FONTCONFIG_FILE="${pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; }}"
+  '';
+
   nativeBuildInputs = [
     pkgs.pkg-config
   ];
