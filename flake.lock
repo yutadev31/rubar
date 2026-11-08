@@ -49,11 +49,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1794150636,
-        "narHash": "sha256-svvV4d8IkQIvs8Rnk238WbIs9Su8r3ZCLxlsMGZX42Q=",
+        "lastModified": 1794151306,
+        "narHash": "sha256-OB1fAVpqxU2IaFauSaqIouJZUU6778yjpU3Pw9OILGg=",
         "owner": "yutadev31",
         "repo": "rustdev-nix",
-        "rev": "1e6ac0106748b22d8263e52ae5d9b1fc55d0d50e",
+        "rev": "57f61027d469b2fc37c92e41e80351b36e93ff30",
         "type": "github"
       },
       "original": {
